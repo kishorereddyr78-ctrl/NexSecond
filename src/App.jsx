@@ -24,6 +24,12 @@ function App() {
   const [notification, setNotification] = useState('')
   const notificationTimerRef = useRef(null)
   const [showLocationPermissionPrompt, setShowLocationPermissionPrompt] = useState(false)
+  const [locationAccuracy, setLocationAccuracy] = useState(
+    localStorage.getItem('nexsecond_location_accuracy')
+      ? Number(localStorage.getItem('nexsecond_location_accuracy'))
+      : null
+  )
+  const [isDetectingLocation, setIsDetectingLocation] = useState(false)
 
   const showNotification = (message) => {
     setNotification(message)
@@ -62,46 +68,89 @@ function App() {
 
   const getCurrentLocation = () => {
     if (!navigator.geolocation) {
-      alert('Location is not supported by your browser.')
+      showNotification('Location is not supported by your browser.')
       return
     }
 
+    setIsDetectingLocation(true)
+    showNotification('Detecting your precise location… 📍')
+
+    const handlePosition = (position) => {
+      const { latitude, longitude, accuracy } = position.coords
+
+      setUserLatitude(latitude)
+      setUserLongitude(longitude)
+      setLocationAccuracy(accuracy)
+
+      localStorage.setItem('nexsecond_latitude', String(latitude))
+      localStorage.setItem('nexsecond_longitude', String(longitude))
+      localStorage.setItem('nexsecond_location_accuracy', String(accuracy))
+
+      fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`,
+        { headers: { Accept: 'application/json' } }
+      )
+        .then((res) => {
+          if (!res.ok) throw new Error('Reverse geocoding failed')
+          return res.json()
+        })
+        .then((data) => {
+          const address = data.address || {}
+          const area =
+            address.suburb ||
+            address.neighbourhood ||
+            address.village ||
+            address.town ||
+            address.city_district ||
+            address.city ||
+            'Location detected 📍'
+
+          setLocation(area)
+          localStorage.setItem('nexsecond_location', area)
+          localStorage.setItem('nexsecond_location_prompt_asked', 'true')
+          setIsLocationOpen(false)
+          setShowLocationPermissionPrompt(false)
+
+          const accuracyText = Math.round(accuracy)
+          showNotification(
+            accuracy <= 100
+              ? `Precise location detected (±${accuracyText} m) 📍`
+              : `Location detected (±${accuracyText} m). You can retry for better accuracy.`
+          )
+        })
+        .catch((error) => {
+          console.error('Reverse geocoding error:', error)
+          setLocation('Current location 📍')
+          setIsLocationOpen(false)
+          setShowLocationPermissionPrompt(false)
+          showNotification(
+            `Location captured (±${Math.round(accuracy)} m) 📍`
+          )
+        })
+        .finally(() => setIsDetectingLocation(false))
+    }
+
+    const handleError = (error) => {
+      console.error('Location error:', error)
+      setIsDetectingLocation(false)
+
+      const message =
+        error.code === 1
+          ? 'Location permission was denied. You can choose an area manually.'
+          : error.code === 2
+          ? 'Your location could not be determined. Please try again.'
+          : 'Location detection timed out. Please try again.'
+
+      showNotification(message)
+    }
+
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude } = position.coords
-
-        setUserLatitude(latitude)
-        setUserLongitude(longitude)
-
-        localStorage.setItem('nexsecond_latitude', latitude)
-        localStorage.setItem('nexsecond_longitude', longitude)
-
-        console.log('Latitude:', latitude)
-        console.log('Longitude:', longitude)
-
-        fetch(
-          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`
-        )
-          .then((res) => res.json())
-          .then((data) => {
-            const area =
-              data.address?.village ||
-              data.address?.town ||
-              data.address?.suburb ||
-              data.address?.city ||
-              'Location detected 📍'
-
-            setLocation(area)
-            localStorage.setItem('nexsecond_location', area)
-            localStorage.setItem('nexsecond_location_prompt_asked', 'true')
-            setIsLocationOpen(false)
-            setShowLocationPermissionPrompt(false)
-            showNotification(`Location detected: ${area} 📍`)
-          })
-      },
-      (error) => {
-        console.error('Location error:', error)
-        showNotification('Unable to get your location. Please allow location access.')
+      handlePosition,
+      handleError,
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0,
       }
     )
   }
@@ -303,12 +352,24 @@ function App() {
   })
 
   const addToCart = (product) => {
+    const stock = Number(product.stock_quantity ?? 0)
+
+    if (stock <= 0) {
+      showNotification(`${product.name} is currently out of stock.`)
+      return
+    }
+
     setCart((currentCart) => {
       const existingProduct = currentCart.find(
         (item) => item.id === product.id
       )
 
       if (existingProduct) {
+        if (existingProduct.quantity >= stock) {
+          showNotification(`Only ${stock} available for ${product.name}.`)
+          return currentCart
+        }
+
         return currentCart.map((item) =>
           item.id === product.id
             ? { ...item, quantity: item.quantity + 1 }
@@ -845,7 +906,7 @@ function App() {
               <div>✓ You stay in control of your location</div>
             </div>
 
-            <button className="allow-location-btn" onClick={allowLocation}>
+            <button className="allow-location-btn" onClick={allowLocation} disabled={isDetectingLocation}>
               Allow location
             </button>
 
@@ -882,7 +943,7 @@ function App() {
             <div className="location-options">
 
               <button onClick={getCurrentLocation}>
-                📍 Use my current location
+                {isDetectingLocation ? '📍 Detecting precise location…' : '📍 Use my current location'}
               </button>
 
               <p className="location-label">
@@ -984,6 +1045,50 @@ function App() {
               <div className="checkout-location">
                 📍 Delivering to:{' '}
                 <strong>{location}</strong>
+                {locationAccuracy && (
+                  <small style={{ display: 'block', marginTop: '5px', opacity: 0.7 }}>
+                    Location accuracy: ±{Math.round(locationAccuracy)} m
+                  </small>
+                )}
+              </div>
+
+              <div
+                style={{
+                  margin: '16px 0',
+                  padding: '15px',
+                  borderRadius: '14px',
+                  border: '1px solid #e5e5e5',
+                  background: '#fafafa',
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '12px',
+                  }}
+                >
+                  <div>
+                    <strong>Payment Method</strong>
+                    <p style={{ margin: '5px 0 0', fontSize: '13px', color: '#666' }}>
+                      Pay when your order is delivered.
+                    </p>
+                  </div>
+                  <span style={{ fontSize: '22px' }}>💵</span>
+                </div>
+                <div
+                  style={{
+                    marginTop: '12px',
+                    padding: '11px 12px',
+                    borderRadius: '10px',
+                    background: '#fff',
+                    border: '1px solid #111',
+                    fontWeight: '700',
+                  }}
+                >
+                  ✓ Cash on Delivery (COD)
+                </div>
               </div>
 
               <h3 className="order-summary-title">
@@ -1257,6 +1362,11 @@ function App() {
               <div>
                 <span>Location detected</span>
                 <strong>{location}</strong>
+              </div>
+
+              <div>
+                <span>Payment method</span>
+                <strong>💵 Cash on Delivery</strong>
               </div>
 
               <div>

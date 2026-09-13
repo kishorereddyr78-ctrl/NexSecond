@@ -13,6 +13,7 @@ function Admin() {
 
   // New-order notification
   const previousNewestOrderId = useRef(null)
+  const realtimeRefreshTimerRef = useRef(null)
   const [newOrderAlert, setNewOrderAlert] = useState(false)
 
   // Delivery typing protection
@@ -269,13 +270,52 @@ function Admin() {
   useEffect(() => {
     fetchOrders()
 
-    const interval = setInterval(() => {
-      if (!isEditingDeliveryRef.current) {
-        fetchOrders()
+    const scheduleRefresh = () => {
+      if (realtimeRefreshTimerRef.current) {
+        clearTimeout(realtimeRefreshTimerRef.current)
       }
-    }, 10000)
 
-    return () => clearInterval(interval)
+      realtimeRefreshTimerRef.current = setTimeout(() => {
+        if (!isEditingDeliveryRef.current) {
+          fetchOrders()
+        }
+      }, 150)
+    }
+
+    const channel = supabase
+      .channel('nexsecond-admin-orders-realtime')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'orders' },
+        (payload) => {
+          console.log('Realtime new order:', payload.new)
+          setNewOrderAlert(true)
+          if (soundEnabled) playNotificationSound()
+          scheduleRefresh()
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'orders' },
+        (payload) => {
+          console.log('Realtime order update:', payload.new)
+          scheduleRefresh()
+        }
+      )
+      .subscribe((status) => {
+        console.log('Admin realtime status:', status)
+      })
+
+    // Fallback: keep the admin panel fresh if Realtime disconnects or is not enabled.
+    const fallbackInterval = setInterval(() => {
+      if (!isEditingDeliveryRef.current) fetchOrders()
+    }, 3000)
+
+    return () => {
+      if (realtimeRefreshTimerRef.current) clearTimeout(realtimeRefreshTimerRef.current)
+      clearInterval(fallbackInterval)
+      supabase.removeChannel(channel)
+    }
   }, [soundEnabled])
 
   return (
@@ -564,23 +604,23 @@ function Admin() {
                     <div style={{ marginTop: '8px' }}>
   <button
     onClick={() => {
-      const latitude = order.latitude
-      const longitude = order.longitude
       const address = order.delivery_address || ''
 
-      if (latitude != null && longitude != null) {
-        const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`
-        window.open(mapsUrl, '_blank')
+      if (!address.trim()) {
+        alert('Delivery address is not available.')
         return
       }
 
-      if (address.trim()) {
-        const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`
-        window.open(mapsUrl, '_blank')
-        return
-      }
+      const latitude = Number(order.latitude)
+      const longitude = Number(order.longitude)
+      const hasCoordinates = Number.isFinite(latitude) && Number.isFinite(longitude)
+      const mapsQuery = hasCoordinates ? `${latitude},${longitude}` : address
 
-      alert('Delivery location is not available.')
+      const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+        mapsQuery
+      )}`
+
+      window.open(mapsUrl, '_blank')
     }}
     style={{
       padding: '8px 12px',
@@ -590,7 +630,7 @@ function Admin() {
       fontWeight: '600',
     }}
   >
-    📍 Navigate to Customer
+    📍 Open in Google Maps
   </button>
 </div>
 
@@ -808,7 +848,9 @@ function Admin() {
 
                     <p>
                       <strong>Payment:</strong>{' '}
-                      {order.payment_method}
+                      {order.payment_method === 'cash_on_delivery'
+                        ? '💵 Cash on Delivery (COD)'
+                        : order.payment_method}
                     </p>
 
                     <p>
