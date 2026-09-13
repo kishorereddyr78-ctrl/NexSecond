@@ -620,7 +620,13 @@ function Admin() {
         mapsQuery
       )}`
 
-      window.open(mapsUrl, '_blank')
+      const mapsLink = document.createElement('a')
+      mapsLink.href = mapsUrl
+      mapsLink.target = '_blank'
+      mapsLink.rel = 'noopener noreferrer'
+      document.body.appendChild(mapsLink)
+      mapsLink.click()
+      document.body.removeChild(mapsLink)
     }}
     style={{
       padding: '8px 12px',
