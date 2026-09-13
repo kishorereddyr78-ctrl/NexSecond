@@ -716,8 +716,15 @@ function App() {
             return (
               <div className="product-card" key={product.id}>
                 <div className="product-image">
-                  {product.emoji}
-                </div>
+  {product.image_url ? (
+    <img
+      src={product.image_url}
+      alt={product.name}
+    />
+  ) : (
+    product.emoji
+  )}
+</div>
 
                 <p className="product-unit">{product.unit}</p>
 
