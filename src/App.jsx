@@ -199,15 +199,20 @@ function App() {
   const [isPlacingOrder, setIsPlacingOrder] = useState(false)
 
   const signInWithGoogle = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-    })
+  const redirectTo = `${window.location.origin}/admin`
 
-    if (error) {
-      console.error('Google login error:', error)
-      alert(error.message)
-    }
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo,
+    },
+  })
+
+  if (error) {
+    console.error('Google login error:', error)
+    alert(error.message)
   }
+}
 
   const sendOtp = async () => {
     if (!loginEmail.trim()) {
@@ -353,8 +358,14 @@ function App() {
 
   const addToCart = (product) => {
     const stock = Number(product.stock_quantity ?? 0)
+const price = Number(product.price ?? 0)
 
-    if (stock <= 0) {
+if (price <= 0) {
+  showNotification(`${product.name} is currently unavailable.`)
+  return
+}
+
+if (stock <= 0) {
       showNotification(`${product.name} is currently out of stock.`)
       return
     }
@@ -522,11 +533,16 @@ function App() {
         )}
 
         <button
-          className="login"
-          onClick={() => setIsOrderHistoryOpen(true)}
-        >
-          Orders
-        </button>
+  className="login"
+  onClick={async () => {
+    if (user) {
+      await fetchOrderHistory()
+    }
+    setIsOrderHistoryOpen(true)
+  }}
+>
+  Orders
+</button>
 
         <button
           className="cart"

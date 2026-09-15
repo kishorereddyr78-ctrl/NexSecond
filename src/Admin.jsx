@@ -23,6 +23,12 @@ function Admin() {
   const audioContextRef = useRef(null)
   const [soundEnabled, setSoundEnabled] = useState(false)
 
+  // Inventory
+  const [products, setProducts] = useState([])
+  const [productLoading, setProductLoading] = useState(true)
+  const [productError, setProductError] = useState('')
+  const [productDrafts, setProductDrafts] = useState({})
+
   const playNotificationSound = async () => {
     try {
       if (!audioContextRef.current) {
@@ -90,6 +96,17 @@ function Admin() {
     }
   }
 
+  const signInWithGoogle = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: `${window.location.origin}/admin` },
+    })
+    if (error) {
+      console.error('Admin Google login error:', error)
+      setErrorMessage(error.message)
+    }
+  }
+
   const fetchOrders = async () => {
     setLoading(true)
     setErrorMessage('')
@@ -144,6 +161,82 @@ function Admin() {
     setLoading(false)
   }
 
+  const fetchProducts = async () => {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) {
+      setProductLoading(false)
+      return
+    }
+
+    setProductLoading(true)
+    setProductError('')
+
+    const { data, error } = await supabase.rpc('get_admin_products')
+
+    if (error) {
+      console.error('Admin product error:', error)
+      setProductError(error.message)
+      setProducts([])
+    } else {
+      setProducts(data || [])
+    }
+
+    setProductLoading(false)
+  }
+
+  const updateProductDraft = (productId, field, value) => {
+    setProductDrafts((current) => ({
+      ...current,
+      [productId]: {
+        ...(current[productId] || {}),
+        [field]: value,
+      },
+    }))
+  }
+
+  const updateProductInventory = async (product) => {
+    const draft = productDrafts[product.id] || {}
+    const stockValue = Number(draft.stock_quantity ?? product.stock_quantity ?? 0)
+    const availableValue = draft.is_available ?? product.is_available ?? false
+
+    if (!Number.isInteger(stockValue) || stockValue < 0) {
+      alert('Stock quantity must be a whole number 0 or greater.')
+      return
+    }
+
+    const { data, error } = await supabase.rpc(
+      'update_admin_product_inventory',
+      {
+        p_product_id: product.id,
+        p_stock_quantity: stockValue,
+        p_is_available: availableValue,
+      }
+    )
+
+    if (error) {
+      alert(`Inventory update failed: ${error.message}`)
+      return
+    }
+
+    setProducts((currentProducts) =>
+      currentProducts.map((currentProduct) =>
+        currentProduct.id === product.id
+          ? {
+              ...currentProduct,
+              stock_quantity: data?.stock_quantity ?? stockValue,
+              is_available: data?.is_available ?? availableValue,
+            }
+          : currentProduct
+      )
+    )
+
+    setProductDrafts((current) => {
+      const updated = { ...current }
+      delete updated[product.id]
+      return updated
+    })
+  }
+
   const updateOrderStatus = async (
     orderDatabaseId,
     newStatus
@@ -165,6 +258,36 @@ function Admin() {
       currentOrders.map((order) =>
         order.id === orderDatabaseId
           ? { ...order, status: newStatus }
+          : order
+      )
+    )
+  }
+
+  const updatePaymentStatus = async (
+    orderDatabaseId,
+    newPaymentStatus
+  ) => {
+    const { data, error } = await supabase.rpc(
+      'update_admin_payment_status',
+      {
+        p_order_database_id: orderDatabaseId,
+        p_payment_status: newPaymentStatus,
+      }
+    )
+
+    if (error) {
+      alert(`Payment status update failed: ${error.message}`)
+      return
+    }
+
+    setOrders((currentOrders) =>
+      currentOrders.map((order) =>
+        order.id === orderDatabaseId
+          ? {
+              ...order,
+              payment_status:
+                data?.payment_status ?? newPaymentStatus,
+            }
           : order
       )
     )
@@ -268,7 +391,24 @@ function Admin() {
     )
 
   useEffect(() => {
-    fetchOrders()
+    const loadForSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.user) {
+        setLoading(false)
+        setProductLoading(false)
+        return
+      }
+      await Promise.all([fetchOrders(), fetchProducts()])
+    }
+
+    loadForSession()
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      setUser(session?.user ?? null)
+      if (session?.user) {
+        await Promise.all([fetchOrders(), fetchProducts()])
+      }
+    })
 
     const scheduleRefresh = () => {
       if (realtimeRefreshTimerRef.current) {
@@ -306,14 +446,13 @@ function Admin() {
         console.log('Admin realtime status:', status)
       })
 
-    // Fallback: keep the admin panel fresh if Realtime disconnects or is not enabled.
-    const fallbackInterval = setInterval(() => {
-      if (!isEditingDeliveryRef.current) fetchOrders()
-    }, 3000)
-
+    // Realtime handles live order updates.
+// Manual "Refresh Orders" is available as a fallback.
+const fallbackInterval = null
     return () => {
+      subscription.unsubscribe()
       if (realtimeRefreshTimerRef.current) clearTimeout(realtimeRefreshTimerRef.current)
-      clearInterval(fallbackInterval)
+      if (fallbackInterval) clearInterval(fallbackInterval)
       supabase.removeChannel(channel)
     }
   }, [soundEnabled])
@@ -333,6 +472,15 @@ function Admin() {
       </h1>
 
       <p>Manage customer orders</p>
+
+      {!user && (
+        <div style={{ maxWidth: '520px', margin: '30px auto', background: '#fff', padding: '28px', borderRadius: '16px', boxShadow: '0 8px 24px rgba(0,0,0,0.08)', textAlign: 'center' }}>
+          <h2 style={{ marginTop: 0 }}>Admin sign-in required</h2>
+          <p style={{ color: '#666', lineHeight: 1.5 }}>Sign in with the Google account that has Admin access to NexSecond.</p>
+          <button onClick={signInWithGoogle} style={{ padding: '12px 18px', borderRadius: '10px', border: '1px solid #ddd', background: '#111', color: '#fff', cursor: 'pointer', fontWeight: '700' }}>Continue with Google</button>
+          {errorMessage && <p style={{ color: '#b91c1c', marginTop: '16px' }}>{errorMessage}</p>}
+        </div>
+      )}
 
       {/* NEW ORDER ALERT */}
       {newOrderAlert && (
@@ -479,6 +627,169 @@ function Admin() {
         Refresh Orders
       </button>
 
+      {/* INVENTORY */}
+      <div
+        style={{
+          marginTop: '25px',
+          marginBottom: '25px',
+          background: '#fff',
+          border: '1px solid #e5e5e5',
+          borderRadius: '16px',
+          padding: '20px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '12px',
+            flexWrap: 'wrap',
+          }}
+        >
+          <div>
+            <h2 style={{ margin: 0 }}>Inventory</h2>
+            <p style={{ margin: '5px 0 0', color: '#666' }}>
+              Restock products and control what customers can order.
+            </p>
+          </div>
+
+          <button
+            onClick={fetchProducts}
+            style={{
+              padding: '9px 13px',
+              borderRadius: '9px',
+              border: '1px solid #ccc',
+              cursor: 'pointer',
+              fontWeight: '600',
+              background: '#fff',
+            }}
+          >
+            Refresh Inventory
+          </button>
+        </div>
+
+        {productLoading ? (
+          <p>Loading inventory...</p>
+        ) : productError ? (
+          <p style={{ color: 'red' }}>Inventory error: {productError}</p>
+        ) : products.length === 0 ? (
+          <p>No products found.</p>
+        ) : (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+              gap: '12px',
+              marginTop: '18px',
+            }}
+          >
+            {products.map((product) => {
+              const draft = productDrafts[product.id] || {}
+              const stockValue = draft.stock_quantity ?? product.stock_quantity ?? 0
+              const availableValue = draft.is_available ?? product.is_available ?? false
+
+              return (
+                <div
+                  key={product.id}
+                  style={{
+                    border: '1px solid #e5e5e5',
+                    borderRadius: '14px',
+                    padding: '15px',
+                    background: '#fafafa',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      gap: '10px',
+                      alignItems: 'flex-start',
+                    }}
+                  >
+                    <div>
+                      <strong>{product.emoji || '🛒'} {product.name}</strong>
+                      <div style={{ marginTop: '4px', color: '#666', fontSize: '13px' }}>
+                        {product.category || 'Uncategorized'} · ₹{product.price} {product.unit ? `· ${product.unit}` : ''}
+                      </div>
+                    </div>
+
+                    <span
+                      style={{
+                        padding: '5px 8px',
+                        borderRadius: '999px',
+                        fontSize: '12px',
+                        fontWeight: '700',
+                        background: availableValue ? '#dcfce7' : '#fee2e2',
+                        color: availableValue ? '#166534' : '#991b1b',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {availableValue ? 'Available' : 'Hidden'}
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '14px' }}>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      inputMode="numeric"
+                      value={stockValue}
+                      onChange={(e) =>
+                        updateProductDraft(product.id, 'stock_quantity', e.target.value)
+                      }
+                      style={{
+                        flex: '1 1 110px',
+                        minWidth: '0',
+                        padding: '9px',
+                        borderRadius: '8px',
+                        border: '1px solid #ccc',
+                        boxSizing: 'border-box',
+                      }}
+                    />
+
+                    <select
+                      value={availableValue ? 'available' : 'hidden'}
+                      onChange={(e) =>
+                        updateProductDraft(product.id, 'is_available', e.target.value === 'available')
+                      }
+                      style={{
+                        flex: '1 1 110px',
+                        padding: '9px',
+                        borderRadius: '8px',
+                        border: '1px solid #ccc',
+                        background: '#fff',
+                      }}
+                    >
+                      <option value="available">Available</option>
+                      <option value="hidden">Hidden</option>
+                    </select>
+
+                    <button
+                      onClick={() => updateProductInventory(product)}
+                      style={{
+                        flex: '1 1 100%',
+                        padding: '9px 12px',
+                        borderRadius: '8px',
+                        border: '1px solid #111',
+                        background: '#111',
+                        color: '#fff',
+                        cursor: 'pointer',
+                        fontWeight: '600',
+                      }}
+                    >
+                      Save Inventory
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
       {loading ? (
         <p>Loading orders...</p>
       ) : errorMessage ? (
@@ -620,13 +931,7 @@ function Admin() {
         mapsQuery
       )}`
 
-      const mapsLink = document.createElement('a')
-      mapsLink.href = mapsUrl
-      mapsLink.target = '_blank'
-      mapsLink.rel = 'noopener noreferrer'
-      document.body.appendChild(mapsLink)
-      mapsLink.click()
-      document.body.removeChild(mapsLink)
+      window.open(mapsUrl, '_blank')
     }}
     style={{
       padding: '8px 12px',
@@ -852,12 +1157,57 @@ function Admin() {
                       {order.total_amount}
                     </p>
 
-                    <p>
-                      <strong>Payment:</strong>{' '}
-                      {order.payment_method === 'cash_on_delivery'
-                        ? '💵 Cash on Delivery (COD)'
-                        : order.payment_method}
-                    </p>
+                    <div
+                      style={{
+                        marginTop: '12px',
+                        padding: '12px',
+                        borderRadius: '10px',
+                        background: '#f8f8f8',
+                        border: '1px solid #e5e5e5',
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '12px',
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        <div>
+                          <strong>Payment</strong>
+                          <div style={{ marginTop: '4px' }}>
+                            {order.payment_method === 'cash_on_delivery'
+                              ? '💵 Cash on Delivery (COD)'
+                              : order.payment_method || 'Not specified'}
+                          </div>
+                        </div>
+
+                        <select
+                          value={order.payment_status || 'pending'}
+                          onChange={(e) =>
+                            updatePaymentStatus(
+                              order.id,
+                              e.target.value
+                            )
+                          }
+                          style={{
+                            padding: '8px 10px',
+                            borderRadius: '8px',
+                            border: '1px solid #ccc',
+                            background: '#fff',
+                            cursor: 'pointer',
+                            minWidth: '120px',
+                          }}
+                        >
+                          <option value="pending">Pending</option>
+                          <option value="paid">Paid</option>
+                          <option value="failed">Failed</option>
+                          <option value="refunded">Refunded</option>
+                        </select>
+                      </div>
+                    </div>
 
                     <p>
                       <strong>Created:</strong>{' '}
