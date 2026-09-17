@@ -2,6 +2,45 @@ import { useEffect, useRef, useState } from 'react'
 import './App.css'
 import { supabase } from './supabase'
 
+const slugify = (value) =>
+  String(value || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+
+const getProductSlug = (product) =>
+  product?.slug || slugify(product?.name) || String(product?.id || '')
+
+const getProductDescription = (product) => {
+  if (product?.description) return product.description
+  const bits = [product?.name, product?.unit].filter(Boolean)
+  return bits.length
+    ? `${bits.join(' ')} available from NexSecond for convenient local delivery.`
+    : 'Everyday essential available from NexSecond.'
+}
+
+const setMetaTag = (attribute, value, content) => {
+  if (!content) return
+  let tag = document.head.querySelector(`meta[${attribute}="${value}"]`)
+  if (!tag) {
+    tag = document.createElement('meta')
+    tag.setAttribute(attribute, value)
+    document.head.appendChild(tag)
+  }
+  tag.setAttribute('content', content)
+}
+
+const setCanonical = (url) => {
+  let link = document.head.querySelector('link[rel="canonical"]')
+  if (!link) {
+    link = document.createElement('link')
+    link.setAttribute('rel', 'canonical')
+    document.head.appendChild(link)
+  }
+  link.setAttribute('href', url)
+}
+
 function App() {
   const [products, setProducts] = useState([])
   const [cart, setCart] = useState([])
@@ -196,69 +235,120 @@ function App() {
   const [orderHistoryLoading, setOrderHistoryLoading] = useState(false)
   const [loginEmail, setLoginEmail] = useState('')
   const [loginOtp, setLoginOtp] = useState('')
+  const [otpSent, setOtpSent] = useState(false)
+  const [otpCooldown, setOtpCooldown] = useState(0)
+  const [authLoading, setAuthLoading] = useState(false)
+  const [authError, setAuthError] = useState('')
   const [isPlacingOrder, setIsPlacingOrder] = useState(false)
+  const [selectedProduct, setSelectedProduct] = useState(null)
+
+  useEffect(() => {
+    if (otpCooldown <= 0) return
+
+    const timer = setInterval(() => {
+      setOtpCooldown((current) => {
+        if (current <= 1) {
+          clearInterval(timer)
+          return 0
+        }
+        return current - 1
+      })
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [otpCooldown])
 
   const signInWithGoogle = async () => {
-  const redirectTo = `${window.location.origin}/admin`
+    setAuthError('')
+    setAuthLoading(true)
 
-  const { error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      redirectTo,
-    },
-  })
+    const redirectTo = `${window.location.origin}/`
 
-  if (error) {
-    console.error('Google login error:', error)
-    alert(error.message)
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo,
+      },
+    })
+
+    if (error) {
+      console.error('Google login error:', error)
+      setAuthError(error.message)
+      setAuthLoading(false)
+    }
   }
-}
 
   const sendOtp = async () => {
-    if (!loginEmail.trim()) {
-      alert('Please enter your email.')
+    const email = loginEmail.trim().toLowerCase()
+
+    if (!email) {
+      setAuthError('Please enter your email.')
       return
     }
 
+    if (otpCooldown > 0 || authLoading) return
+
+    setAuthError('')
+    setAuthLoading(true)
+
     const { error } = await supabase.auth.signInWithOtp({
-      email: loginEmail.trim(),
+      email,
     })
 
     if (error) {
       console.error('OTP error:', error)
-      alert(error.message)
+      setAuthError(error.message)
+      setAuthLoading(false)
       return
     }
 
-    alert('OTP sent! Enter the 6-digit code.')
+    setOtpSent(true)
+    setLoginOtp('')
+    setOtpCooldown(60)
+    setAuthLoading(false)
+    showNotification('OTP sent. Check your email ✉️')
   }
 
   const verifyOtp = async () => {
-    if (!loginEmail.trim()) {
-      alert('Please enter your email.')
+    const email = loginEmail.trim().toLowerCase()
+    const token = loginOtp.trim()
+
+    if (!email) {
+      setAuthError('Please enter your email.')
       return
     }
 
-    if (!loginOtp.trim()) {
-      alert('Please enter the OTP.')
+    if (!/^\d{6}$/.test(token)) {
+      setAuthError('Please enter the 6-digit OTP.')
       return
     }
+
+    setAuthError('')
+    setAuthLoading(true)
 
     const { error } = await supabase.auth.verifyOtp({
-      email: loginEmail.trim(),
-      token: loginOtp.trim(),
+      email,
+      token,
       type: 'email',
     })
 
     if (error) {
       console.error('OTP verification error:', error)
-      alert(error.message)
+      setAuthError(error.message)
+      setAuthLoading(false)
       return
     }
 
-    alert('Login successful! 🎉')
-    setIsLoginOpen(false)
+    // onAuthStateChange will close the modal and update user state.
+    setAuthLoading(false)
+  }
+
+  const resetLoginForm = () => {
+    setLoginEmail('')
     setLoginOtp('')
+    setOtpSent(false)
+    setAuthError('')
+    setAuthLoading(false)
   }
 
   async function fetchOrderHistory() {
@@ -310,18 +400,198 @@ function App() {
     fetchProducts()
   }, [])
 
+  const openProduct = (product) => {
+    setSelectedProduct(product)
+    const slug = getProductSlug(product)
+    const nextUrl = `${window.location.pathname}?product=${encodeURIComponent(slug)}`
+    window.history.pushState({ product: slug }, '', nextUrl)
+  }
+
+  const closeProduct = () => {
+    setSelectedProduct(null)
+    window.history.pushState({}, '', window.location.pathname)
+  }
+
   useEffect(() => {
+    const syncProductFromUrl = () => {
+      const slug = new URLSearchParams(window.location.search).get('product')
+      if (!slug || products.length === 0) {
+        setSelectedProduct(null)
+        return
+      }
+
+      const product = products.find((item) => getProductSlug(item) === slug)
+      setSelectedProduct(product || null)
+    }
+
+    syncProductFromUrl()
+    window.addEventListener('popstate', syncProductFromUrl)
+    return () => window.removeEventListener('popstate', syncProductFromUrl)
+  }, [products])
+
+  useEffect(() => {
+    const siteName = 'NexSecond'
+    const baseTitle = 'NexSecond | Quick Delivery of Groceries & Daily Essentials'
+    const baseDescription =
+      'Shop groceries, snacks, drinks and everyday essentials with NexSecond. Simple local ordering and convenient delivery.'
+    const productTitle = selectedProduct
+      ? `${selectedProduct.name} | NexSecond`
+      : baseTitle
+    const description = selectedProduct
+      ? getProductDescription(selectedProduct)
+      : baseDescription
+    const url = selectedProduct
+      ? `${window.location.origin}${window.location.pathname}?product=${encodeURIComponent(getProductSlug(selectedProduct))}`
+      : `${window.location.origin}${window.location.pathname}`
+
+    document.title = productTitle
+    setMetaTag('name', 'description', description)
+    setMetaTag('name', 'robots', 'index,follow,max-image-preview:large')
+    setMetaTag('property', 'og:site_name', siteName)
+    setMetaTag('property', 'og:title', productTitle)
+    setMetaTag('property', 'og:description', description)
+    setMetaTag('property', 'og:url', url)
+    setMetaTag('property', 'og:type', selectedProduct ? 'product' : 'website')
+    setMetaTag('property', 'og:locale', 'en_IN')
+    setMetaTag('name', 'twitter:card', 'summary_large_image')
+    setMetaTag('name', 'twitter:title', productTitle)
+    setMetaTag('name', 'twitter:description', description)
+
+    let ogImage = document.head.querySelector('meta[data-nexsecond-og-image]')
+    if (selectedProduct?.image_url) {
+      if (!ogImage) {
+        ogImage = document.createElement('meta')
+        ogImage.setAttribute('property', 'og:image')
+        ogImage.dataset.nexsecondOgImage = 'true'
+        document.head.appendChild(ogImage)
+      }
+      ogImage.setAttribute('content', selectedProduct.image_url)
+
+      let twitterImage = document.head.querySelector('meta[data-nexsecond-twitter-image]')
+      if (!twitterImage) {
+        twitterImage = document.createElement('meta')
+        twitterImage.setAttribute('name', 'twitter:image')
+        twitterImage.dataset.nexsecondTwitterImage = 'true'
+        document.head.appendChild(twitterImage)
+      }
+      twitterImage.setAttribute('content', selectedProduct.image_url)
+    } else {
+      if (ogImage) ogImage.remove()
+      const twitterImage = document.head.querySelector('meta[data-nexsecond-twitter-image]')
+      if (twitterImage) twitterImage.remove()
+    }
+
+    setCanonical(url)
+
+    const existingSchema = document.head.querySelector('script[data-nexsecond-schema]')
+    if (existingSchema) existingSchema.remove()
+
+    const schema = selectedProduct
+      ? {
+          '@context': 'https://schema.org',
+          '@graph': [
+            {
+              '@type': 'Product',
+              name: selectedProduct.name,
+              description,
+              url,
+              image: selectedProduct.image_url ? [selectedProduct.image_url] : undefined,
+              category: selectedProduct.category || undefined,
+              offers: {
+                '@type': 'Offer',
+                url,
+                priceCurrency: 'INR',
+                price: Number(selectedProduct.price || 0),
+                availability:
+                  Number(selectedProduct.stock_quantity || 0) > 0
+                    ? 'https://schema.org/InStock'
+                    : 'https://schema.org/OutOfStock',
+                itemCondition: 'https://schema.org/NewCondition',
+              },
+            },
+            {
+              '@type': 'BreadcrumbList',
+              itemListElement: [
+                {
+                  '@type': 'ListItem',
+                  position: 1,
+                  name: 'NexSecond',
+                  item: `${window.location.origin}${window.location.pathname}`,
+                },
+                ...(selectedProduct.category
+                  ? [{
+                      '@type': 'ListItem',
+                      position: 2,
+                      name: selectedProduct.category,
+                    }]
+                  : []),
+                {
+                  '@type': 'ListItem',
+                  position: selectedProduct.category ? 3 : 2,
+                  name: selectedProduct.name,
+                  item: url,
+                },
+              ],
+            },
+          ],
+        }
+      : {
+          '@context': 'https://schema.org',
+          '@type': 'WebSite',
+          name: siteName,
+          url: `${window.location.origin}${window.location.pathname}`,
+          description: baseDescription,
+        }
+
+    const cleanSchema = JSON.parse(JSON.stringify(schema))
+    const script = document.createElement('script')
+    script.type = 'application/ld+json'
+    script.dataset.nexsecondSchema = 'true'
+    script.textContent = JSON.stringify(cleanSchema)
+    document.head.appendChild(script)
+
+    return () => {
+      const currentSchema = document.head.querySelector('script[data-nexsecond-schema]')
+      if (currentSchema) currentSchema.remove()
+    }
+  }, [selectedProduct])
+
+
+  useEffect(() => {
+    let mounted = true
+
     supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!mounted) return
       setUser(session?.user ?? null)
     })
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!mounted) return
+
       setUser(session?.user ?? null)
+
+      if (event === 'SIGNED_IN') {
+        setIsLoginOpen(false)
+        setIsAccountOpen(false)
+        resetLoginForm()
+        showNotification('Welcome to NexSecond 👋')
+      }
+
+      if (event === 'SIGNED_OUT') {
+        setOrderHistory([])
+        setIsAccountOpen(false)
+        setIsOrderHistoryOpen(false)
+        resetLoginForm()
+        showNotification('You have been logged out.')
+      }
     })
 
-    return () => subscription.unsubscribe()
+    return () => {
+      mounted = false
+      subscription.unsubscribe()
+    }
   }, [])
 
   useEffect(() => {
@@ -345,9 +615,20 @@ function App() {
   }, [user, isOrderHistoryOpen])
 
   const filteredProducts = products.filter((product) => {
-    const matchesSearch = product.name
+    const searchText = search.trim().toLowerCase()
+    const searchableText = [
+      product.name,
+      product.category,
+      product.unit,
+      product.brand,
+      product.description,
+      product.search_keywords,
+    ]
+      .filter(Boolean)
+      .join(' ')
       .toLowerCase()
-      .includes(search.toLowerCase())
+
+    const matchesSearch = !searchText || searchableText.includes(searchText)
 
     const matchesCategory =
       selectedCategory === 'All' ||
@@ -523,8 +804,11 @@ if (stock <= 0) {
 
             <button
               onClick={async () => {
-                await supabase.auth.signOut({ scope: 'local' })
-                setIsAccountOpen(false)
+                const { error } = await supabase.auth.signOut({ scope: 'global' })
+                if (error) {
+                  console.error('Logout error:', error)
+                  showNotification(error.message)
+                }
               }}
             >
               🚪 Logout
@@ -535,10 +819,12 @@ if (stock <= 0) {
         <button
   className="login"
   onClick={async () => {
-    if (user) {
-      await fetchOrderHistory()
+    if (!user) {
+      setIsLoginOpen(true)
+      return
     }
     setIsOrderHistoryOpen(true)
+    fetchOrderHistory()
   }}
 >
   Orders
@@ -570,7 +856,14 @@ if (stock <= 0) {
 
         <button
           className="mobile-action"
-          onClick={() => setIsOrderHistoryOpen(true)}
+          onClick={async () => {
+            if (!user) {
+              setIsLoginOpen(true)
+              return
+            }
+            setIsOrderHistoryOpen(true)
+            fetchOrderHistory()
+          }}
         >
           <span>📦</span>
           <small>Orders</small>
@@ -730,17 +1023,31 @@ if (stock <= 0) {
             const quantity = getQuantity(product.id)
 
             return (
-              <div className="product-card" key={product.id}>
+              <div
+                className="product-card"
+                key={product.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => openProduct(product)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    openProduct(product)
+                  }
+                }}
+                aria-label={`View ${product.name}`}
+              >
                 <div className="product-image">
-  {product.image_url ? (
-    <img
-      src={product.image_url}
-      alt={product.name}
-    />
-  ) : (
-    product.emoji
-  )}
-</div>
+                  {product.image_url ? (
+                    <img
+                      src={product.image_url}
+                      alt={`${product.name} - NexSecond`}
+                      loading="lazy"
+                    />
+                  ) : (
+                    product.emoji
+                  )}
+                </div>
 
                 <p className="product-unit">{product.unit}</p>
 
@@ -750,29 +1057,30 @@ if (stock <= 0) {
                   <strong>₹{product.price}</strong>
 
                   {quantity === 0 ? (
-                    <button onClick={() => addToCart(product)}>
+                    <button
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        addToCart(product)
+                      }}
+                    >
                       ADD
                     </button>
                   ) : (
-                    <div className="quantity-control">
-                      <button
-                        onClick={() =>
-                          decreaseQuantity(product.id)
-                        }
-                      >
+                    <div className="quantity-control" onClick={(event) => event.stopPropagation()}>
+                      <button onClick={() => decreaseQuantity(product.id)}>
                         −
                       </button>
 
                       <span>{quantity}</span>
 
-                      <button
-                        onClick={() => addToCart(product)}
-                      >
+                      <button onClick={() => addToCart(product)}>
                         +
                       </button>
                     </div>
                   )}
                 </div>
+
+                <span className="product-view-hint">View details →</span>
               </div>
             )
           })}
@@ -799,6 +1107,85 @@ if (stock <= 0) {
           <button onClick={() => setIsCartOpen(true)}>
             View Cart →
           </button>
+        </div>
+      )}
+
+      {/* PRODUCT DETAIL */}
+      {selectedProduct && (
+        <div className="product-detail-overlay" onClick={closeProduct}>
+          <div
+            className="product-detail-panel"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              className="product-detail-close"
+              onClick={closeProduct}
+              aria-label="Close product details"
+            >
+              ✕
+            </button>
+
+            <div className="product-detail-media">
+              {selectedProduct.image_url ? (
+                <img
+                  src={selectedProduct.image_url}
+                  alt={`${selectedProduct.name} - NexSecond`}
+                />
+              ) : (
+                <span>{selectedProduct.emoji || '🛍️'}</span>
+              )}
+            </div>
+
+            <div className="product-detail-content">
+              <p className="product-detail-category">
+                {selectedProduct.category || 'Everyday Essential'}
+              </p>
+              <h2>{selectedProduct.name}</h2>
+              <p className="product-detail-unit">{selectedProduct.unit}</p>
+              <p className="product-detail-description">
+                {getProductDescription(selectedProduct)}
+              </p>
+
+              <div className="product-detail-price-row">
+                <div>
+                  <strong>₹{selectedProduct.price}</strong>
+                  <span>{Number(selectedProduct.stock_quantity || 0) > 0 ? 'In stock' : 'Out of stock'}</span>
+                </div>
+              </div>
+
+              {Number(selectedProduct.stock_quantity || 0) > 0 ? (
+                <div className="product-detail-actions">
+                  <button
+                    className="product-detail-add"
+                    onClick={() => {
+                      addToCart(selectedProduct)
+                      showNotification(`${selectedProduct.name} added to cart 🛒`)
+                    }}
+                  >
+                    Add to Cart · ₹{selectedProduct.price}
+                  </button>
+                  <button
+                    className="product-detail-buy"
+                    onClick={() => {
+                      addToCart(selectedProduct)
+                      closeProduct()
+                      setIsCartOpen(true)
+                    }}
+                  >
+                    Buy now →
+                  </button>
+                </div>
+              ) : (
+                <div className="product-detail-soldout">Currently unavailable. Please check back soon.</div>
+              )}
+
+              <div className="product-detail-trust">
+                <span>⚡ Quick local delivery</span>
+                <span>🔒 Secure account ordering</span>
+                <span>📍 Delivery-area aware</span>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -838,7 +1225,11 @@ if (stock <= 0) {
                   <div className="cart-item" key={item.id}>
 
                     <div className="cart-item-image">
-                      {item.emoji}
+                      {item.image_url ? (
+                        <img src={item.image_url} alt="" loading="lazy" />
+                      ) : (
+                        item.emoji
+                      )}
                     </div>
 
                     <div className="cart-item-info">
@@ -1748,9 +2139,10 @@ if (stock <= 0) {
 
             <button
               className="login-close"
-              onClick={() =>
+              onClick={() => {
                 setIsLoginOpen(false)
-              }
+                resetLoginForm()
+              }}
             >
               ✕
             </button>
@@ -1767,42 +2159,79 @@ if (stock <= 0) {
               type="email"
               placeholder="Enter your email"
               value={loginEmail}
-              onChange={(e) =>
+              onChange={(e) => {
                 setLoginEmail(e.target.value)
-              }
+                setAuthError('')
+              }}
+              disabled={authLoading}
             />
 
-            <input
-              type="text"
-              placeholder="Enter OTP"
-              maxLength="6"
-              value={loginOtp}
-              onChange={(e) =>
-                setLoginOtp(e.target.value)
-              }
-            />
+            {otpSent && (
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="Enter 6-digit OTP"
+                maxLength="6"
+                value={loginOtp}
+                onChange={(e) =>
+                  setLoginOtp(e.target.value.replace(/\D/g, '').slice(0, 6))
+                }
+                disabled={authLoading}
+              />
+            )}
 
-            {loginOtp.trim() ? (
+            {authError && <p className="login-error">{authError}</p>}
+
+            <button
+              className="login-submit"
+              onClick={otpSent ? verifyOtp : sendOtp}
+              disabled={authLoading || (!otpSent && otpCooldown > 0)}
+            >
+              {authLoading
+                ? otpSent
+                  ? 'Verifying…'
+                  : 'Sending…'
+                : otpSent
+                  ? 'Verify OTP'
+                  : otpCooldown > 0
+                    ? `Code sent · ${otpCooldown}s`
+                    : 'Send OTP'}
+            </button>
+
+            {otpSent && (
+              <p style={{ marginTop: '10px', fontSize: '13px', color: '#666' }}>
+                Check your email for the 6-digit code. Please allow a few seconds for delivery.
+              </p>
+            )}
+
+            {otpSent && (
               <button
-                className="login-submit"
-                onClick={verifyOtp}
-              >
-                Verify OTP
-              </button>
-            ) : (
-              <button
-                className="login-submit"
+                style={{
+                  width: '100%',
+                  marginTop: '10px',
+                  padding: '10px',
+                  border: 'none',
+                  background: 'transparent',
+                  color: otpCooldown > 0 ? '#999' : '#111',
+                  cursor: otpCooldown > 0 ? 'not-allowed' : 'pointer',
+                  fontWeight: 600,
+                }}
+                className="otp-resend-button"
                 onClick={sendOtp}
+                disabled={authLoading || otpCooldown > 0}
+                type="button"
               >
-                Send OTP
+                {otpCooldown > 0 ? `Resend code in ${otpCooldown}s` : 'Resend code'}
               </button>
             )}
 
             <button
               className="google-login-button"
               onClick={signInWithGoogle}
+              disabled={authLoading}
             >
-              Continue with Google
+              {authLoading ? 'Connecting…' : 'Continue with Google'}
             </button>
 
             <p className="login-note">
