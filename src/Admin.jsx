@@ -357,13 +357,22 @@ function Admin() {
     await fetchOrders()
   }
 
-  const today = new Date().toDateString()
+  const NEXSECOND_TIME_ZONE = 'Asia/Kolkata'
 
-  const todayOrders = orders.filter(
-    (order) =>
-      new Date(order.created_at).toDateString() ===
-      today
-  )
+const getNexSecondDateKey = (value) =>
+  new Intl.DateTimeFormat('en-CA', {
+    timeZone: NEXSECOND_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(value))
+
+const today = getNexSecondDateKey(new Date())
+
+const todayOrders = orders.filter(
+  (order) =>
+    getNexSecondDateKey(order.created_at) === today
+)
 
   const totalOrders = orders.length
 
@@ -1210,11 +1219,17 @@ const fallbackInterval = null
                     </div>
 
                     <p>
-                      <strong>Created:</strong>{' '}
-                      {new Date(
-                        order.created_at
-                      ).toLocaleString()}
-                    </p>
+  <strong>Created:</strong>{' '}
+  {new Date(order.created_at).toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  })}
+</p>
                   </div>
                 )
               })}

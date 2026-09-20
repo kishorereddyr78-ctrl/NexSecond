@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import './App.css'
 import { supabase } from './supabase'
+import NexIcon from './NexIcons'
 
 const slugify = (value) =>
   String(value || '')
@@ -69,8 +70,6 @@ function App() {
       : null
   )
   const [isDetectingLocation, setIsDetectingLocation] = useState(false)
-  const [deliveryServiceability, setDeliveryServiceability] = useState(null)
-  const [deliveryServiceabilityLoading, setDeliveryServiceabilityLoading] = useState(false)
 
   const showNotification = (message) => {
     setNotification(message)
@@ -107,43 +106,6 @@ function App() {
       : null
   )
 
-  const checkDeliveryServiceability = async (latitude, longitude, showResult = false) => {
-    if (latitude == null || longitude == null) {
-      setDeliveryServiceability(null)
-      return null
-    }
-
-    setDeliveryServiceabilityLoading(true)
-
-    const { data, error } = await supabase.rpc('check_nexsecond_delivery_area', {
-      p_latitude: latitude,
-      p_longitude: longitude,
-    })
-
-    setDeliveryServiceabilityLoading(false)
-
-    if (error) {
-      console.error('Delivery area check error:', error)
-      setDeliveryServiceability(null)
-      if (showResult) {
-        showNotification('We could not verify your delivery area. Please try again.')
-      }
-      return null
-    }
-
-    setDeliveryServiceability(data || null)
-
-    if (showResult) {
-      if (data?.is_serviceable) {
-        showNotification('Great — NexSecond delivers to your location ✓')
-      } else {
-        showNotification('NexSecond is not delivering to this location yet.')
-      }
-    }
-
-    return data || null
-  }
-
   const getCurrentLocation = () => {
     if (!navigator.geolocation) {
       showNotification('Location is not supported by your browser.')
@@ -163,7 +125,6 @@ function App() {
       localStorage.setItem('nexsecond_latitude', String(latitude))
       localStorage.setItem('nexsecond_longitude', String(longitude))
       localStorage.setItem('nexsecond_location_accuracy', String(accuracy))
-      checkDeliveryServiceability(latitude, longitude, false)
 
       fetch(
         `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`,
@@ -233,11 +194,6 @@ function App() {
       }
     )
   }
-
-  useEffect(() => {
-    if (userLatitude == null || userLongitude == null) return
-    checkDeliveryServiceability(userLatitude, userLongitude, false)
-  }, [userLatitude, userLongitude])
 
   useEffect(() => {
     // Versioned permission state makes sure customers who tested an older
@@ -797,13 +753,35 @@ if (stock <= 0) {
   const FREE_DELIVERY_THRESHOLD = 169
 
   const discountAmount = Number(checkoutQuote?.discount_amount ?? 0)
-  const quotedDeliveryFee = Number(checkoutQuote?.delivery_fee ?? (cartCount > 0 ? (cartTotal >= FREE_DELIVERY_THRESHOLD ? 0 : 20) : 0))
-  const quotedHandlingFee = Number(checkoutQuote?.handling_fee ?? HANDLING_FEE)
-  const quotedSubtotal = Number(checkoutQuote?.subtotal ?? cartTotal)
-  const finalTotal = Number(
-    checkoutQuote?.total_amount ??
-      Math.max(quotedSubtotal - discountAmount + quotedHandlingFee + quotedDeliveryFee, 0)
-  )
+
+  const quotedDeliveryFee =
+    checkoutQuote != null
+      ? Number(checkoutQuote.delivery_fee ?? 0)
+      : null
+
+  const quotedHandlingFee =
+    checkoutQuote != null
+      ? Number(checkoutQuote.handling_fee ?? HANDLING_FEE)
+      : HANDLING_FEE
+
+  const quotedSubtotal =
+    checkoutQuote != null
+      ? Number(checkoutQuote.subtotal ?? cartTotal)
+      : cartTotal
+
+  const finalTotal =
+    checkoutQuote != null
+      ? Number(
+          checkoutQuote.total_amount ??
+            Math.max(
+              quotedSubtotal -
+                discountAmount +
+                quotedHandlingFee +
+                Number(quotedDeliveryFee ?? 0),
+              0
+            )
+        )
+      : null
 
   useEffect(() => {
     let cancelled = false
@@ -820,10 +798,10 @@ if (stock <= 0) {
       }))
 
       const { data, error } = await supabase.rpc('get_checkout_quote', {
-        p_items: items,
-        p_latitude: userLatitude,
-        p_longitude: userLongitude,
-      })
+  p_items: items,
+  p_latitude: userLatitude,
+  p_longitude: userLongitude,
+})
 
       if (cancelled) return
 
@@ -841,7 +819,8 @@ if (stock <= 0) {
     return () => {
       cancelled = true
     }
-  }, [cart, userLatitude, userLongitude])
+  }, [cart, userLatitude, userLongitude, isCheckoutOpen])
+
   return (
     <div className="app">
 
@@ -894,7 +873,7 @@ if (stock <= 0) {
           className="location"
           onClick={() => setIsLocationOpen(true)}
         >
-          📍
+          <NexIcon name="location" size={18} strokeWidth={2} />
           <div>
             <small>Delivering to</small>
             <strong>{location}</strong>
@@ -902,7 +881,7 @@ if (stock <= 0) {
         </button>
 
         <div className="search-container">
-          <span>🔍</span>
+          <NexIcon name="search" size={18} strokeWidth={2} />
 
           <input
             className="search"
@@ -923,7 +902,12 @@ if (stock <= 0) {
             }
           }}
         >
-          {user ? '👤 Account' : 'Login'}
+          {user ? (
+            <>
+              <NexIcon name="user" size={17} strokeWidth={2} />
+              <span>Account</span>
+            </>
+          ) : 'Login'}
         </button>
 
         {isAccountOpen && user && (
@@ -936,7 +920,7 @@ if (stock <= 0) {
                 setIsOrderHistoryOpen(true)
               }}
             >
-              📦 My Orders
+              <><NexIcon name="orders" size={16} strokeWidth={2} /> My Orders</>
             </button>
 
             <button
@@ -971,7 +955,7 @@ if (stock <= 0) {
           className="cart"
           onClick={() => setIsCartOpen(true)}
         >
-          🛒 <span>Cart</span>
+          <NexIcon name="cart" size={18} strokeWidth={2} /> <span>Cart</span>
           <b>{cartCount}</b>
         </button>
       </header>
@@ -987,7 +971,7 @@ if (stock <= 0) {
             }
           }}
         >
-          <span>👤</span>
+          <NexIcon name="user" size={19} strokeWidth={2} />
           <small>{user ? 'Account' : 'Login'}</small>
         </button>
 
@@ -1002,7 +986,7 @@ if (stock <= 0) {
             fetchOrderHistory()
           }}
         >
-          <span>📦</span>
+          <NexIcon name="orders" size={19} strokeWidth={2} />
           <small>Orders</small>
         </button>
 
@@ -1010,7 +994,7 @@ if (stock <= 0) {
           className="mobile-action"
           onClick={() => setIsLocationOpen(true)}
         >
-          <span>📍</span>
+          <NexIcon name="location" size={19} strokeWidth={2} />
           <small>Location</small>
         </button>
 
@@ -1018,7 +1002,7 @@ if (stock <= 0) {
           className="mobile-action"
           onClick={() => setIsCartOpen(true)}
         >
-          <span>🛒</span>
+          <NexIcon name="cart" size={19} strokeWidth={2} />
           <small>Cart ({cartCount})</small>
         </button>
       </div>
@@ -1026,7 +1010,12 @@ if (stock <= 0) {
       {/* HERO */}
       <section className="hero-section">
         <div className="hero-content">
-          <p className="tag">⚡ QUICK DELIVERY • EVERYDAY ESSENTIALS</p>
+          <p className="tag">
+            <span className="tag-mark">
+              <NexIcon name="truck" size={14} strokeWidth={2.2} />
+            </span>
+            QUICK DELIVERY · EVERYDAY ESSENTIALS
+          </p>
 
           <h1>
             Need it now?
@@ -1052,14 +1041,29 @@ if (stock <= 0) {
 
         <div className="hero-visual">
           <div className="delivery-badge">
-            ⚡ <strong>Fast Delivery</strong>
-            <span>Right to your door</span>
+            <span className="delivery-badge-icon">
+              <NexIcon name="truck" size={18} strokeWidth={2.2} />
+            </span>
+            <div>
+              <strong>Fast Delivery</strong>
+              <span>Right to your door</span>
+            </div>
           </div>
 
-          <div className="hero-emoji">🛍️</div>
+          <div className="hero-art">
+            <div className="hero-art-orbit hero-art-orbit--one"></div>
+            <div className="hero-art-orbit hero-art-orbit--two"></div>
+
+            <div className="hero-art-card hero-art-card--main">
+              <NexIcon name="cart" size={72} strokeWidth={1.6} />
+            </div>
+
+            <div className="hero-art-card hero-art-card--small">
+              <NexIcon name="truck" size={28} strokeWidth={1.8} />
+            </div>
+          </div>
         </div>
       </section>
-
       {/* LAUNCH OFFER — quiet, useful, always visible without blocking the shop */}
       {!launchPromotionLoading && launchHasOffer && (
         <section className="launch-panel" aria-label="NexSecond launch offer">
@@ -1126,41 +1130,6 @@ if (stock <= 0) {
           )}
         </section>
       )}
-
-      {/* BENEFITS */}
-      <section className="benefits">
-        <div>
-          ⚡
-          <span>
-            <strong>Quick delivery</strong>
-            <small>Get essentials faster</small>
-          </span>
-        </div>
-
-        <div>
-          🛍️
-          <span>
-            <strong>Everything nearby</strong>
-            <small>All your daily needs</small>
-          </span>
-        </div>
-
-        <div>
-          💰
-          <span>
-            <strong>Fair pricing</strong>
-            <small>No unnecessary surprises</small>
-          </span>
-        </div>
-
-        <div>
-          ❤️
-          <span>
-            <strong>Made for you</strong>
-            <small>Simple and convenient</small>
-          </span>
-        </div>
-      </section>
 
       {/* CATEGORIES */}
       <section className="section">
@@ -1495,39 +1464,27 @@ if (stock <= 0) {
 
                 <div className="price-row">
                   <span>Delivery fee</span>
-                  <strong>{quotedDeliveryFee === 0 ? 'FREE' : `₹${quotedDeliveryFee.toFixed(2)}`}</strong>
+                  <strong>
+                    {quotedDeliveryFee == null
+                      ? 'Calculating…'
+                      : quotedDeliveryFee === 0
+                      ? 'FREE'
+                      : `₹${quotedDeliveryFee.toFixed(2)}`}
+                  </strong>
                 </div>
 
                 <div className="price-row total-row">
                   <strong>Total</strong>
-                  <strong>₹{finalTotal}</strong>
+                  <strong>
+                    {finalTotal == null
+                      ? 'Calculating…'
+                      : `₹${finalTotal.toFixed(2)}`}
+                  </strong>
                 </div>
 
                 <button
                   className="checkout-btn"
-                  onClick={async () => {
-                    if (userLatitude == null || userLongitude == null) {
-                      setIsCartOpen(false)
-                      setIsLocationOpen(true)
-                      showNotification('Set your exact location to check delivery availability.')
-                      return
-                    }
-
-                    let serviceability = deliveryServiceability
-                    if (!serviceability) {
-                      serviceability = await checkDeliveryServiceability(
-                        userLatitude,
-                        userLongitude,
-                        true
-                      )
-                    }
-
-                    if (!serviceability?.is_serviceable) {
-                      setIsCartOpen(false)
-                      setIsLocationOpen(true)
-                      return
-                    }
-
+                  onClick={() => {
                     setIsCartOpen(false)
                     setIsCheckoutOpen(true)
                   }}
@@ -1603,7 +1560,6 @@ if (stock <= 0) {
               <button
                 onClick={() => {
                   setLocation('Harohalli')
-                  setDeliveryServiceability(null)
                   localStorage.setItem('nexsecond_location', 'Harohalli')
                   localStorage.setItem('nexsecond_location_prompt_asked', 'true')
                   setIsLocationOpen(false)
@@ -1616,7 +1572,6 @@ if (stock <= 0) {
               <button
                 onClick={() => {
                   setLocation('Kanakapura Road')
-                  setDeliveryServiceability(null)
                   localStorage.setItem('nexsecond_location', 'Kanakapura Road')
                   localStorage.setItem('nexsecond_location_prompt_asked', 'true')
                   setIsLocationOpen(false)
@@ -1629,7 +1584,6 @@ if (stock <= 0) {
               <button
                 onClick={() => {
                   setLocation('Bangalore')
-                  setDeliveryServiceability(null)
                   localStorage.setItem('nexsecond_location', 'Bangalore')
                   localStorage.setItem('nexsecond_location_prompt_asked', 'true')
                   setIsLocationOpen(false)
@@ -1707,21 +1661,6 @@ if (stock <= 0) {
 
               <div
                 style={{
-                  marginTop: '10px',
-                  fontSize: '13px',
-                  fontWeight: '700',
-                  color: deliveryServiceability?.is_serviceable ? '#0c831f' : '#9a3412',
-                }}
-              >
-                {deliveryServiceabilityLoading
-                  ? 'Checking delivery availability…'
-                  : deliveryServiceability?.is_serviceable
-                  ? '✓ Delivery available at this location'
-                  : 'Set or verify your exact location to continue'}
-              </div>
-
-              <div
-                style={{
                   margin: '16px 0',
                   padding: '15px',
                   borderRadius: '14px',
@@ -1765,6 +1704,8 @@ if (stock <= 0) {
 
               <div className="checkout-summary">
 
+                {(discountAmount > 0 || quotedDeliveryFee === 0) && (<div key={`offer-${discountAmount}-${quotedDeliveryFee}-${checkoutQuote?.promotion || ""}`} className="checkout-benefit-reveal"><div className="checkout-benefit-reveal__icon">{discountAmount > 0 ? "🎉" : "🚚"}</div><div className="checkout-benefit-reveal__content"><strong>{discountAmount > 0 ? (checkoutQuote?.promotion || "Offer applied") : "FREE DELIVERY unlocked"}</strong><span>{discountAmount > 0 ? `You save ₹${discountAmount.toFixed(2)}` : "Your order qualifies for free delivery"}</span></div></div>)}
+
                 <div>
                   <span>Items ({cartCount})</span>
                   <strong>₹{cartTotal.toFixed(2)}</strong>
@@ -1782,7 +1723,13 @@ if (stock <= 0) {
 
                 <div>
                   <span>Delivery fee</span>
-                  <strong>{quotedDeliveryFee === 0 ? 'FREE' : `₹${quotedDeliveryFee.toFixed(2)}`}</strong>
+                  <strong>
+                    {quotedDeliveryFee == null
+                      ? 'Calculating…'
+                      : quotedDeliveryFee === 0
+                      ? 'FREE'
+                      : `₹${quotedDeliveryFee.toFixed(2)}`}
+                  </strong>
                 </div>
 
                 {quotedSubtotal < FREE_DELIVERY_THRESHOLD && cartCount > 0 && (
@@ -1799,7 +1746,11 @@ if (stock <= 0) {
 
                 <div className="checkout-total">
                   <strong>Total</strong>
-                  <strong>₹{finalTotal}</strong>
+                  <strong>
+                    {finalTotal == null
+                      ? 'Calculating…'
+                      : `₹${finalTotal.toFixed(2)}`}
+                  </strong>
                 </div>
 
               </div>
@@ -1843,25 +1794,6 @@ if (stock <= 0) {
                       "Your cart is empty."
                     )
                     return
-                  }
-
-                  if (userLatitude == null || userLongitude == null) {
-                    setCheckoutError('Please set your exact delivery location first.')
-                    setIsLocationOpen(true)
-                    return
-                  }
-
-                  if (!deliveryServiceability?.is_serviceable) {
-                    const serviceability = await checkDeliveryServiceability(
-                      userLatitude,
-                      userLongitude,
-                      false
-                    )
-
-                    if (!serviceability?.is_serviceable) {
-                      setCheckoutError('NexSecond is not delivering to this location yet.')
-                      return
-                    }
                   }
 
                   setCheckoutError("")
@@ -2102,6 +2034,186 @@ if (stock <= 0) {
 
         </div>
       )}
+
+            {/* FOOTER */}
+      <footer className="site-footer">
+        <div className="site-footer-main">
+
+          <div className="footer-brand">
+            <div className="footer-logo">
+              NexSecond<span>.</span>
+            </div>
+
+            <p>
+              Need it now? Get it NexSecond.
+            </p>
+
+            <small>
+              Everyday essentials delivered locally,
+              simply and conveniently.
+            </small>
+
+            <div className="footer-trust-row">
+              <span>🔐 Secure login</span>
+              <span>💵 COD available</span>
+              <span>📍 Local delivery</span>
+            </div>
+          </div>
+
+          <div className="footer-column">
+            <h3>Useful Links</h3>
+
+            <button
+              type="button"
+              onClick={() =>
+                window.scrollTo({
+                  top: 0,
+                  behavior: 'smooth',
+                })
+              }
+            >
+              Home
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                document
+                  .querySelector('.products-section')
+                  ?.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'start',
+                  })
+              }
+            >
+              Shop
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedCategory('All')
+                document
+                  .querySelector('.products-section')
+                  ?.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'start',
+                  })
+              }}
+            >
+              Categories
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (!user) {
+                  setIsLoginOpen(true)
+                  return
+                }
+
+                setIsOrderHistoryOpen(true)
+                fetchOrderHistory()
+              }}
+            >
+              My Orders
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (user) {
+                  setIsAccountOpen(true)
+                } else {
+                  setIsLoginOpen(true)
+                }
+              }}
+            >
+              Account
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsCartOpen(true)}
+            >
+              Cart
+            </button>
+          </div>
+
+          <div className="footer-column">
+            <h3>Categories</h3>
+
+            {[
+              'Vegetables',
+              'Fruits',
+              'Dairy',
+              'Snacks',
+              'Drinks',
+              'Groceries',
+            ].map((category) => (
+              <button
+                type="button"
+                key={category}
+                onClick={() => {
+                  setSelectedCategory(category)
+
+                  document
+                    .querySelector('.products-section')
+                    ?.scrollIntoView({
+                      behavior: 'smooth',
+                      block: 'start',
+                    })
+                }}
+              >
+                {category}
+              </button>
+            ))}
+          </div>
+
+          <div className="footer-column footer-service">
+            <h3>NexSecond Service</h3>
+
+            <button
+              type="button"
+              onClick={() => setIsLocationOpen(true)}
+            >
+              📍 Delivery Area
+            </button>
+
+            <div className="footer-info">
+              <strong>₹169</strong>
+              <span>Minimum order</span>
+            </div>
+
+            <div className="footer-info">
+              <strong>FREE</strong>
+              <span>Delivery above ₹169</span>
+            </div>
+
+            <div className="footer-info">
+              <strong>₹16–₹20</strong>
+              <span>Delivery below ₹169</span>
+            </div>
+
+            <div className="footer-info">
+              <strong>COD</strong>
+              <span>Cash on Delivery</span>
+            </div>
+          </div>
+
+        </div>
+
+        <div className="site-footer-bottom">
+          <span>
+            © 2026 NexSecond. All rights reserved.
+          </span>
+
+          <span>
+            Local essentials • Fast delivery • Simple ordering
+          </span>
+        </div>
+      </footer>
+
 
       {/* ORDER HISTORY */}
       {isOrderHistoryOpen && (
@@ -2412,10 +2524,16 @@ if (stock <= 0) {
                     </div>
 
                     <div className="order-date">
-                      {new Date(
-                        order.created_at
-                      ).toLocaleString()}
-                    </div>
+  {new Date(order.created_at).toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  })}
+</div>
 
                   </div>
                 ))}
