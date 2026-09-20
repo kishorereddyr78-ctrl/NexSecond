@@ -69,6 +69,8 @@ function App() {
       : null
   )
   const [isDetectingLocation, setIsDetectingLocation] = useState(false)
+  const [deliveryServiceability, setDeliveryServiceability] = useState(null)
+  const [deliveryServiceabilityLoading, setDeliveryServiceabilityLoading] = useState(false)
 
   const showNotification = (message) => {
     setNotification(message)
@@ -105,6 +107,43 @@ function App() {
       : null
   )
 
+  const checkDeliveryServiceability = async (latitude, longitude, showResult = false) => {
+    if (latitude == null || longitude == null) {
+      setDeliveryServiceability(null)
+      return null
+    }
+
+    setDeliveryServiceabilityLoading(true)
+
+    const { data, error } = await supabase.rpc('check_nexsecond_delivery_area', {
+      p_latitude: latitude,
+      p_longitude: longitude,
+    })
+
+    setDeliveryServiceabilityLoading(false)
+
+    if (error) {
+      console.error('Delivery area check error:', error)
+      setDeliveryServiceability(null)
+      if (showResult) {
+        showNotification('We could not verify your delivery area. Please try again.')
+      }
+      return null
+    }
+
+    setDeliveryServiceability(data || null)
+
+    if (showResult) {
+      if (data?.is_serviceable) {
+        showNotification('Great — NexSecond delivers to your location ✓')
+      } else {
+        showNotification('NexSecond is not delivering to this location yet.')
+      }
+    }
+
+    return data || null
+  }
+
   const getCurrentLocation = () => {
     if (!navigator.geolocation) {
       showNotification('Location is not supported by your browser.')
@@ -124,6 +163,7 @@ function App() {
       localStorage.setItem('nexsecond_latitude', String(latitude))
       localStorage.setItem('nexsecond_longitude', String(longitude))
       localStorage.setItem('nexsecond_location_accuracy', String(accuracy))
+      checkDeliveryServiceability(latitude, longitude, false)
 
       fetch(
         `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`,
@@ -195,6 +235,11 @@ function App() {
   }
 
   useEffect(() => {
+    if (userLatitude == null || userLongitude == null) return
+    checkDeliveryServiceability(userLatitude, userLongitude, false)
+  }, [userLatitude, userLongitude])
+
+  useEffect(() => {
     // Versioned permission state makes sure customers who tested an older
     // NexSecond build still see the new first-visit location experience.
     const permissionDecision = localStorage.getItem(
@@ -240,7 +285,10 @@ function App() {
   const [authLoading, setAuthLoading] = useState(false)
   const [authError, setAuthError] = useState('')
   const [isPlacingOrder, setIsPlacingOrder] = useState(false)
+  const [checkoutQuote, setCheckoutQuote] = useState(null)
   const [selectedProduct, setSelectedProduct] = useState(null)
+  const [launchPromotion, setLaunchPromotion] = useState(null)
+  const [launchPromotionLoading, setLaunchPromotionLoading] = useState(true)
 
   useEffect(() => {
     if (otpCooldown <= 0) return
@@ -398,6 +446,31 @@ function App() {
     }
 
     fetchProducts()
+  }, [])
+
+  const fetchLaunchPromotion = async () => {
+    setLaunchPromotionLoading(true)
+
+    const { data, error } = await supabase.rpc('get_launch_promotion')
+
+    if (error) {
+      console.error('Launch promotion error:', error)
+      setLaunchPromotion(null)
+    } else {
+      setLaunchPromotion(data || null)
+    }
+
+    setLaunchPromotionLoading(false)
+  }
+
+  useEffect(() => {
+    fetchLaunchPromotion()
+
+    const interval = setInterval(() => {
+      fetchLaunchPromotion()
+    }, 30000)
+
+    return () => clearInterval(interval)
   }, [])
 
   const openProduct = (product) => {
@@ -702,9 +775,73 @@ if (stock <= 0) {
     0
   )
 
-  const deliveryFee = cartCount > 0 ? 20 : 0
-  const finalTotal = cartTotal + deliveryFee
+  const launchDiscountRate = Number(launchPromotion?.discount_rate ?? 0)
+  const launchDiscountPercent = Math.round(launchDiscountRate * 100)
+  const launchDiscountMin = Number(launchPromotion?.discount_min_subtotal ?? 0)
+  const launchNextMilestone =
+    launchPromotion?.milestones?.find(
+      (milestone) => Number(milestone.order_number) === Number(launchPromotion?.next_milestone)
+    ) || launchPromotion?.milestones?.[0] || null
+  const launchNextMilestoneRate = Number(launchNextMilestone?.rate ?? 0)
+  const launchNextMilestonePercent = Math.round(launchNextMilestoneRate * 100)
+  const launchNextMilestoneCap = Number(launchNextMilestone?.max_discount ?? 0)
+  const launchProgress = Math.min(100, Math.max(0, Number(launchPromotion?.progress_percent ?? 0)))
+  const launchOrdersToNext = Math.max(0, Number(launchPromotion?.orders_to_next ?? 0))
+  const launchCurrentOrders = Math.max(0, Number(launchPromotion?.current_orders ?? 0))
+  const launchHasOffer =
+    Boolean(launchPromotion?.is_active) &&
+    launchDiscountPercent > 0 &&
+    launchDiscountMin > 0
 
+  const HANDLING_FEE = 3.20
+  const FREE_DELIVERY_THRESHOLD = 169
+
+  const discountAmount = Number(checkoutQuote?.discount_amount ?? 0)
+  const quotedDeliveryFee = Number(checkoutQuote?.delivery_fee ?? (cartCount > 0 ? (cartTotal >= FREE_DELIVERY_THRESHOLD ? 0 : 20) : 0))
+  const quotedHandlingFee = Number(checkoutQuote?.handling_fee ?? HANDLING_FEE)
+  const quotedSubtotal = Number(checkoutQuote?.subtotal ?? cartTotal)
+  const finalTotal = Number(
+    checkoutQuote?.total_amount ??
+      Math.max(quotedSubtotal - discountAmount + quotedHandlingFee + quotedDeliveryFee, 0)
+  )
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function refreshCheckoutQuote() {
+      if (cart.length === 0) {
+        setCheckoutQuote(null)
+        return
+      }
+
+      const items = cart.map((item) => ({
+        product_id: item.id,
+        quantity: item.quantity,
+      }))
+
+      const { data, error } = await supabase.rpc('get_checkout_quote', {
+        p_items: items,
+        p_latitude: userLatitude,
+        p_longitude: userLongitude,
+      })
+
+      if (cancelled) return
+
+      if (error) {
+        console.error('Checkout quote error:', error)
+        setCheckoutQuote(null)
+        return
+      }
+
+      setCheckoutQuote(data || null)
+    }
+
+    refreshCheckoutQuote()
+
+    return () => {
+      cancelled = true
+    }
+  }, [cart, userLatitude, userLongitude])
   return (
     <div className="app">
 
@@ -922,6 +1059,73 @@ if (stock <= 0) {
           <div className="hero-emoji">🛍️</div>
         </div>
       </section>
+
+      {/* LAUNCH OFFER — quiet, useful, always visible without blocking the shop */}
+      {!launchPromotionLoading && launchHasOffer && (
+        <section className="launch-panel" aria-label="NexSecond launch offer">
+          <div className="launch-offer">
+            <div className="launch-offer-main">
+              <span className="launch-eyebrow">NEXSECOND LAUNCH OFFER</span>
+
+              <div className="launch-offer-copy">
+                <strong>{launchDiscountPercent}% off</strong>
+                <span>on orders above ₹{launchDiscountMin.toFixed(0)}</span>
+              </div>
+
+              <p>Applied automatically at checkout. No code needed.</p>
+            </div>
+
+            <button
+              type="button"
+              className="launch-shop-link"
+              onClick={() =>
+                document.querySelector('.products-section')
+                  ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              }
+            >
+              Shop the offer →
+            </button>
+          </div>
+
+          {launchNextMilestone && launchPromotion?.next_milestone && (
+            <div className="launch-milestone">
+              <div className="launch-milestone-top">
+                <div>
+                  <span className="launch-milestone-label">NEXT COMMUNITY MILESTONE</span>
+                  <strong>#{launchPromotion.next_milestone}</strong>
+                </div>
+
+                <div className="launch-milestone-reward">
+                  <strong>{launchNextMilestonePercent}% off</strong>
+                  <span>up to ₹{launchNextMilestoneCap.toFixed(0)}</span>
+                </div>
+              </div>
+
+              <div
+                className="launch-progress-track"
+                role="progressbar"
+                aria-label={`Progress toward milestone #${launchPromotion.next_milestone}`}
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow={launchProgress}
+              >
+                <span style={{ width: `${launchProgress}%` }} />
+              </div>
+
+              <div className="launch-milestone-bottom">
+                <span>
+                  {launchCurrentOrders} {launchCurrentOrders === 1 ? 'order' : 'orders'} reached
+                </span>
+                <strong>
+                  {launchOrdersToNext > 0
+                    ? `${launchOrdersToNext} to go`
+                    : 'Milestone reached'}
+                </strong>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* BENEFITS */}
       <section className="benefits">
@@ -1276,12 +1480,22 @@ if (stock <= 0) {
 
                 <div className="price-row">
                   <span>Subtotal</span>
-                  <strong>₹{cartTotal}</strong>
+                  <strong>₹{quotedSubtotal.toFixed(2)}</strong>
+                </div>
+
+                <div className="price-row">
+                  <span>Discount</span>
+                  <strong>{discountAmount > 0 ? `−₹${discountAmount.toFixed(2)}` : '₹0.00'}</strong>
+                </div>
+
+                <div className="price-row">
+                  <span>Handling charge</span>
+                  <strong>₹{quotedHandlingFee.toFixed(2)}</strong>
                 </div>
 
                 <div className="price-row">
                   <span>Delivery fee</span>
-                  <strong>₹{deliveryFee}</strong>
+                  <strong>{quotedDeliveryFee === 0 ? 'FREE' : `₹${quotedDeliveryFee.toFixed(2)}`}</strong>
                 </div>
 
                 <div className="price-row total-row">
@@ -1291,7 +1505,29 @@ if (stock <= 0) {
 
                 <button
                   className="checkout-btn"
-                  onClick={() => {
+                  onClick={async () => {
+                    if (userLatitude == null || userLongitude == null) {
+                      setIsCartOpen(false)
+                      setIsLocationOpen(true)
+                      showNotification('Set your exact location to check delivery availability.')
+                      return
+                    }
+
+                    let serviceability = deliveryServiceability
+                    if (!serviceability) {
+                      serviceability = await checkDeliveryServiceability(
+                        userLatitude,
+                        userLongitude,
+                        true
+                      )
+                    }
+
+                    if (!serviceability?.is_serviceable) {
+                      setIsCartOpen(false)
+                      setIsLocationOpen(true)
+                      return
+                    }
+
                     setIsCartOpen(false)
                     setIsCheckoutOpen(true)
                   }}
@@ -1367,6 +1603,7 @@ if (stock <= 0) {
               <button
                 onClick={() => {
                   setLocation('Harohalli')
+                  setDeliveryServiceability(null)
                   localStorage.setItem('nexsecond_location', 'Harohalli')
                   localStorage.setItem('nexsecond_location_prompt_asked', 'true')
                   setIsLocationOpen(false)
@@ -1379,6 +1616,7 @@ if (stock <= 0) {
               <button
                 onClick={() => {
                   setLocation('Kanakapura Road')
+                  setDeliveryServiceability(null)
                   localStorage.setItem('nexsecond_location', 'Kanakapura Road')
                   localStorage.setItem('nexsecond_location_prompt_asked', 'true')
                   setIsLocationOpen(false)
@@ -1391,6 +1629,7 @@ if (stock <= 0) {
               <button
                 onClick={() => {
                   setLocation('Bangalore')
+                  setDeliveryServiceability(null)
                   localStorage.setItem('nexsecond_location', 'Bangalore')
                   localStorage.setItem('nexsecond_location_prompt_asked', 'true')
                   setIsLocationOpen(false)
@@ -1468,6 +1707,21 @@ if (stock <= 0) {
 
               <div
                 style={{
+                  marginTop: '10px',
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  color: deliveryServiceability?.is_serviceable ? '#0c831f' : '#9a3412',
+                }}
+              >
+                {deliveryServiceabilityLoading
+                  ? 'Checking delivery availability…'
+                  : deliveryServiceability?.is_serviceable
+                  ? '✓ Delivery available at this location'
+                  : 'Set or verify your exact location to continue'}
+              </div>
+
+              <div
+                style={{
                   margin: '16px 0',
                   padding: '15px',
                   borderRadius: '14px',
@@ -1513,13 +1767,35 @@ if (stock <= 0) {
 
                 <div>
                   <span>Items ({cartCount})</span>
-                  <strong>₹{cartTotal}</strong>
+                  <strong>₹{cartTotal.toFixed(2)}</strong>
+                </div>
+
+                <div>
+                  <span>Discount</span>
+                  <strong>{discountAmount > 0 ? `−₹${discountAmount.toFixed(2)}` : '₹0.00'}</strong>
+                </div>
+
+                <div>
+                  <span>Handling charge</span>
+                  <strong>₹{quotedHandlingFee.toFixed(2)}</strong>
                 </div>
 
                 <div>
                   <span>Delivery fee</span>
-                  <strong>₹{deliveryFee}</strong>
+                  <strong>{quotedDeliveryFee === 0 ? 'FREE' : `₹${quotedDeliveryFee.toFixed(2)}`}</strong>
                 </div>
+
+                {quotedSubtotal < FREE_DELIVERY_THRESHOLD && cartCount > 0 && (
+                  <div className="free-delivery-hint">
+                    ₹{(FREE_DELIVERY_THRESHOLD - quotedSubtotal).toFixed(2)} more for FREE delivery
+                  </div>
+                )}
+
+                {discountAmount > 0 && (
+                  <div className="discount-hint">
+                    🎉 Discount applied — you save ₹{discountAmount.toFixed(2)}
+                  </div>
+                )}
 
                 <div className="checkout-total">
                   <strong>Total</strong>
@@ -1567,6 +1843,25 @@ if (stock <= 0) {
                       "Your cart is empty."
                     )
                     return
+                  }
+
+                  if (userLatitude == null || userLongitude == null) {
+                    setCheckoutError('Please set your exact delivery location first.')
+                    setIsLocationOpen(true)
+                    return
+                  }
+
+                  if (!deliveryServiceability?.is_serviceable) {
+                    const serviceability = await checkDeliveryServiceability(
+                      userLatitude,
+                      userLongitude,
+                      false
+                    )
+
+                    if (!serviceability?.is_serviceable) {
+                      setCheckoutError('NexSecond is not delivering to this location yet.')
+                      return
+                    }
                   }
 
                   setCheckoutError("")
@@ -1645,6 +1940,8 @@ if (stock <= 0) {
                   setLastOrderTotal(
                     data.total_amount
                   )
+
+                  fetchLaunchPromotion()
 
                   showNotification(
                     "Order placed successfully!"
