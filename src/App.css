@@ -10021,3 +10021,321 @@ button:active {
     font-size: 13px;
   }
 }
+
+/* =========================================================
+   NEXSECOND — LOCATION / CHECKOUT MOBILE SAFETY PATCH
+   Prevents modal overlap, clipping and unreachable actions.
+   ========================================================= */
+
+/* Keep every location layer above the entire application. */
+.location-permission-overlay,
+.location-overlay,
+.checkout-location-gate-overlay {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100dvh !important;
+  min-height: 100vh !important;
+  z-index: 99990 !important;
+  box-sizing: border-box !important;
+  isolation: isolate;
+}
+
+/* Lock the visual layer behind an open location dialog. */
+.location-permission-overlay,
+.location-overlay,
+.checkout-location-gate-overlay {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Never let a modal card become larger than the usable screen. */
+.location-permission-card,
+.location-panel,
+.checkout-location-gate {
+  box-sizing: border-box !important;
+  max-width: calc(100vw - 24px) !important;
+  max-height: calc(100dvh - 24px) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+}
+
+/* =========================================================
+   INITIAL LOCATION PERMISSION
+   ========================================================= */
+
+.location-permission-overlay {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: max(12px, env(safe-area-inset-top))
+           max(12px, env(safe-area-inset-right))
+           max(12px, env(safe-area-inset-bottom))
+           max(12px, env(safe-area-inset-left)) !important;
+}
+
+.location-permission-card {
+  width: min(460px, calc(100vw - 24px)) !important;
+  max-height: calc(100dvh - 24px) !important;
+  margin: auto !important;
+}
+
+/* =========================================================
+   EXACT CHECKOUT LOCATION GATE
+   ========================================================= */
+
+.checkout-location-gate-overlay {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding:
+    max(14px, env(safe-area-inset-top))
+    max(14px, env(safe-area-inset-right))
+    max(14px, env(safe-area-inset-bottom))
+    max(14px, env(safe-area-inset-left)) !important;
+}
+
+.checkout-location-gate {
+  width: min(520px, calc(100vw - 28px)) !important;
+  max-height: calc(100dvh - 28px) !important;
+  margin: auto !important;
+  overscroll-behavior: contain;
+}
+
+/* The close button must always remain visible. */
+.checkout-location-gate__close {
+  z-index: 5 !important;
+  flex: 0 0 auto;
+}
+
+/* Never allow long status text to push the verified badge off-screen. */
+.checkout-location-gate__status {
+  min-width: 0 !important;
+}
+
+.checkout-location-gate__status-main {
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
+}
+
+.checkout-location-gate__status-main div {
+  min-width: 0 !important;
+}
+
+.checkout-location-gate__status-main strong,
+.checkout-location-gate__status-main span {
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.checkout-location-gate__verified {
+  flex: 0 0 auto !important;
+}
+
+/* Main action is always full-width and easy to hit. */
+.checkout-location-gate__primary {
+  position: relative !important;
+  z-index: 2 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  min-height: 54px !important;
+  padding: 12px 16px !important;
+  box-sizing: border-box !important;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* =========================================================
+   MOBILE — 600px AND BELOW
+   ========================================================= */
+
+@media (max-width: 600px) {
+
+  .location-permission-overlay {
+    align-items: flex-end !important;
+    padding:
+      max(10px, env(safe-area-inset-top))
+      max(10px, env(safe-area-inset-right))
+      max(10px, env(safe-area-inset-bottom))
+      max(10px, env(safe-area-inset-left)) !important;
+  }
+
+  .location-permission-card {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: calc(100dvh - 20px) !important;
+    margin: 0 !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .checkout-location-gate-overlay {
+    align-items: flex-end !important;
+    padding:
+      max(8px, env(safe-area-inset-top))
+      max(8px, env(safe-area-inset-right))
+      max(8px, env(safe-area-inset-bottom))
+      max(8px, env(safe-area-inset-left)) !important;
+  }
+
+  .checkout-location-gate {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: calc(100dvh - 16px) !important;
+    margin: 0 !important;
+    padding:
+      22px
+      18px
+      max(18px, env(safe-area-inset-bottom)) !important;
+    border-radius: 25px 25px 18px 18px !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .checkout-location-gate h2 {
+    max-width: calc(100% - 42px) !important;
+    margin-right: 42px !important;
+    font-size: clamp(22px, 6vw, 25px) !important;
+    line-height: 1.12 !important;
+  }
+
+  .checkout-location-gate > p {
+    font-size: 12px !important;
+    line-height: 1.55 !important;
+  }
+
+  .checkout-location-gate__steps {
+    gap: 7px !important;
+    margin-top: 16px !important;
+  }
+
+  .checkout-location-gate__steps > div {
+    grid-template-columns: 28px minmax(0, 1fr) !important;
+    gap: 9px !important;
+    padding: 9px !important;
+  }
+
+  .checkout-location-gate__steps strong {
+    font-size: 11px !important;
+  }
+
+  .checkout-location-gate__status {
+    align-items: flex-start !important;
+    gap: 8px !important;
+    padding: 11px !important;
+  }
+
+  .checkout-location-gate__verified {
+    font-size: 8px !important;
+    white-space: nowrap !important;
+  }
+
+  .checkout-location-gate__primary {
+    min-height: 54px !important;
+    margin-top: 4px !important;
+    border-radius: 15px !important;
+    font-size: 13px !important;
+  }
+
+  .checkout-location-gate__note {
+    margin-bottom: 0 !important;
+  }
+}
+
+/* =========================================================
+   VERY SMALL PHONES — 320–380px
+   ========================================================= */
+
+@media (max-width: 380px) {
+
+  .location-permission-card {
+    padding-left: 15px !important;
+    padding-right: 15px !important;
+  }
+
+  .checkout-location-gate {
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+  }
+
+  .checkout-location-gate__icon {
+    width: 56px !important;
+    height: 56px !important;
+    font-size: 25px !important;
+  }
+
+  .checkout-location-gate h2 {
+    font-size: 21px !important;
+  }
+
+  .checkout-location-gate__steps > div {
+    grid-template-columns: 26px minmax(0, 1fr) !important;
+    gap: 7px !important;
+    padding: 8px !important;
+  }
+
+  .checkout-location-gate__steps span {
+    width: 26px !important;
+    height: 26px !important;
+  }
+
+  .checkout-location-gate__steps strong {
+    font-size: 10px !important;
+  }
+}
+
+/* =========================================================
+   SHORT SCREENS — prevents buttons disappearing below fold
+   ========================================================= */
+
+@media (max-height: 700px) {
+
+  .checkout-location-gate {
+    max-height: calc(100dvh - 12px) !important;
+  }
+
+  .checkout-location-gate__icon {
+    width: 54px !important;
+    height: 54px !important;
+    margin-bottom: 9px !important;
+    font-size: 24px !important;
+  }
+
+  .checkout-location-gate h2 {
+    margin-top: 6px !important;
+    margin-bottom: 7px !important;
+  }
+
+  .checkout-location-gate__steps {
+    margin-top: 12px !important;
+    margin-bottom: 9px !important;
+    gap: 6px !important;
+  }
+
+  .checkout-location-gate__steps > div {
+    padding: 7px 9px !important;
+  }
+}
+
+/* =========================================================
+   TOUCH SAFETY
+   ========================================================= */
+
+.location-permission-card button,
+.location-panel button,
+.checkout-location-gate button {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.location-permission-card button:disabled,
+.location-panel button:disabled,
+.checkout-location-gate button:disabled {
+  pointer-events: none;
+}
+

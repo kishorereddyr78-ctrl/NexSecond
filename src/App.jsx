@@ -1456,48 +1456,6 @@ if (stock <= 0) {
         </section>
       )}
 
-      {/* CATEGORIES */}
-      <section className="section">
-        <div className="section-heading">
-          <div>
-            <h2>Shop by category</h2>
-            <p>Everything you need in one place</p>
-          </div>
-
-          <button
-            className="view-all"
-            onClick={() => setSelectedCategory('All')}
-          >
-            View all →
-          </button>
-        </div>
-
-        <div className="categories">
-          {categories.map((category) => (
-            <button
-              key={category.name}
-              className={`category ${
-                selectedCategory === category.name
-                  ? 'active-category'
-                  : ''
-              }`}
-              onClick={() => {
-                setSelectedCategory(category.name)
-
-                document.querySelector('.products-section')
-                  ?.scrollIntoView({ behavior: 'smooth' })
-              }}
-            >
-              <span className="category-emoji">
-                {category.emoji}
-              </span>
-
-              <span>{category.name}</span>
-            </button>
-          ))}
-        </div>
-      </section>
-
       {/* PRODUCTS */}
       <section className="section products-section">
         <div className="section-heading">
@@ -2646,20 +2604,7 @@ if (stock <= 0) {
               Shop
             </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedCategory('All')
-                document
-                  .querySelector('.products-section')
-                  ?.scrollIntoView({
-                    behavior: 'smooth',
-                    block: 'start',
-                  })
-              }}
-            >
-              Categories
-            </button>
+
 
             <button
               type="button"
@@ -2695,36 +2640,6 @@ if (stock <= 0) {
             >
               Cart
             </button>
-          </div>
-
-          <div className="footer-column">
-            <h3>Categories</h3>
-
-            {[
-              'Vegetables',
-              'Fruits',
-              'Dairy',
-              'Snacks',
-              'Drinks',
-              'Groceries',
-            ].map((category) => (
-              <button
-                type="button"
-                key={category}
-                onClick={() => {
-                  setSelectedCategory(category)
-
-                  document
-                    .querySelector('.products-section')
-                    ?.scrollIntoView({
-                      behavior: 'smooth',
-                      block: 'start',
-                    })
-                }}
-              >
-                {category}
-              </button>
-            ))}
           </div>
 
           <div className="footer-column footer-service">
