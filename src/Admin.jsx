@@ -456,224 +456,727 @@ const todayOrders = orders.filter(
       })
 
     // Realtime handles live order updates.
-// Manual "Refresh Orders" is available as a fallback.
-const fallbackInterval = null
+    // Manual "Refresh Orders" is available as a fallback.
+    const fallbackInterval = null
+
     return () => {
       subscription.unsubscribe()
-      if (realtimeRefreshTimerRef.current) clearTimeout(realtimeRefreshTimerRef.current)
+      if (realtimeRefreshTimerRef.current) {
+        clearTimeout(realtimeRefreshTimerRef.current)
+      }
       if (fallbackInterval) clearInterval(fallbackInterval)
       supabase.removeChannel(channel)
     }
   }, [soundEnabled])
 
   return (
-    <div
-      style={{
-        padding: '20px',
-        fontFamily: 'Arial, sans-serif',
-        background: '#f7f7f7',
-        minHeight: '100vh',
-        boxSizing: 'border-box',
-      }}
-    >
-      <h1 style={{ marginBottom: '5px' }}>
-        NexSecond Admin
-      </h1>
+    <div className="admin-shell">
+      <style>{`
+        .admin-shell {
+          --admin-ink: #121716;
+          --admin-muted: #6b7471;
+          --admin-border: #e5e8e6;
+          --admin-surface: #ffffff;
+          --admin-surface-soft: #f7f9f8;
+          --admin-green: #0b7a2a;
+          --admin-green-soft: #edf7f0;
+          min-height: 100vh;
+          box-sizing: border-box;
+          padding: clamp(14px, 2.6vw, 30px);
+          background: #f5f7f6;
+          color: var(--admin-ink);
+          font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+        }
 
-      <p>Manage customer orders</p>
+        .admin-shell *,
+        .admin-shell *::before,
+        .admin-shell *::after {
+          box-sizing: border-box;
+        }
+
+        .admin-shell button,
+        .admin-shell input,
+        .admin-shell select {
+          font: inherit;
+        }
+
+        .admin-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 20px;
+          margin-bottom: 18px;
+          padding: 18px 20px;
+          background: rgba(255,255,255,.94);
+          border: 1px solid var(--admin-border);
+          border-radius: 20px;
+          box-shadow: 0 10px 28px rgba(16, 31, 23, .06);
+        }
+
+        .admin-brand {
+          min-width: 0;
+          display: flex;
+          align-items: center;
+          gap: 14px;
+        }
+
+        .admin-logo {
+          display: block;
+          width: 210px;
+          height: 54px;
+          object-fit: contain;
+          object-position: left center;
+          border-radius: 10px;
+          background: #fff;
+        }
+
+        .admin-brand-text {
+          display: grid;
+          gap: 4px;
+          min-width: 0;
+        }
+
+        .admin-brand-text strong {
+          font-size: 17px;
+          line-height: 1;
+          letter-spacing: -.02em;
+        }
+
+        .admin-brand-text span {
+          color: var(--admin-muted);
+          font-size: 13px;
+        }
+
+        .admin-header-actions {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+
+        .admin-account {
+          display: grid;
+          gap: 2px;
+          min-width: 160px;
+          margin-right: 4px;
+        }
+
+        .admin-account span {
+          color: var(--admin-muted);
+          font-size: 11px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: .06em;
+        }
+
+        .admin-account strong {
+          max-width: 230px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          font-size: 13px;
+        }
+
+        .admin-btn {
+          min-height: 42px;
+          padding: 10px 14px;
+          border: 1px solid #dfe4e1;
+          border-radius: 11px;
+          background: #fff;
+          color: #151a18;
+          cursor: pointer;
+          font-weight: 700;
+          transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease, background .18s ease;
+        }
+
+        .admin-btn:hover {
+          transform: translateY(-1px);
+          border-color: #cfd8d3;
+          box-shadow: 0 7px 18px rgba(12, 30, 20, .07);
+        }
+
+        .admin-btn:active {
+          transform: translateY(0);
+        }
+
+        .admin-btn--dark {
+          background: #111;
+          border-color: #111;
+          color: #fff;
+        }
+
+        .admin-card {
+          background: var(--admin-surface);
+          border: 1px solid var(--admin-border);
+          border-radius: 18px;
+          box-shadow: 0 8px 22px rgba(16, 31, 23, .045);
+        }
+
+        .admin-login-card {
+          max-width: 560px;
+          margin: 34px auto;
+          padding: clamp(22px, 4vw, 34px);
+          text-align: center;
+        }
+
+        .admin-login-card h2 {
+          margin: 0 0 10px;
+        }
+
+        .admin-login-card p {
+          margin: 0;
+          color: var(--admin-muted);
+          line-height: 1.6;
+        }
+
+        .admin-login-card .admin-btn {
+          margin-top: 20px;
+        }
+
+        .admin-alert {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          margin: 16px 0;
+          padding: 13px 16px;
+          background: #edf9f0;
+          border: 1px solid #b7e4c0;
+          border-radius: 14px;
+          color: #185d29;
+          font-weight: 700;
+        }
+
+        .admin-control-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          flex-wrap: wrap;
+          margin: 16px 0 20px;
+        }
+
+        .admin-control-note {
+          color: var(--admin-muted);
+          font-size: 13px;
+        }
+
+        .admin-summary-grid {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 14px;
+          margin: 20px 0 24px;
+        }
+
+        .admin-summary-card {
+          padding: 19px 20px;
+        }
+
+        .admin-summary-card strong {
+          display: block;
+          color: var(--admin-muted);
+          font-size: 13px;
+          font-weight: 700;
+        }
+
+        .admin-summary-card h2 {
+          margin: 10px 0 0;
+          font-size: clamp(24px, 2.8vw, 32px);
+          letter-spacing: -.03em;
+        }
+
+        .admin-section {
+          margin: 22px 0;
+          padding: clamp(18px, 2.5vw, 24px);
+        }
+
+        .admin-section-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 14px;
+          flex-wrap: wrap;
+        }
+
+        .admin-section-head h2 {
+          margin: 0;
+          font-size: clamp(21px, 2vw, 27px);
+          letter-spacing: -.02em;
+        }
+
+        .admin-section-head p {
+          margin: 5px 0 0;
+          color: var(--admin-muted);
+          line-height: 1.45;
+        }
+
+        .admin-inventory-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+          gap: 12px;
+          margin-top: 18px;
+        }
+
+        .admin-product-card {
+          padding: 15px;
+          background: var(--admin-surface-soft);
+          border: 1px solid var(--admin-border);
+          border-radius: 14px;
+        }
+
+        .admin-product-top {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 10px;
+        }
+
+        .admin-product-meta {
+          margin-top: 4px;
+          color: var(--admin-muted);
+          font-size: 13px;
+          line-height: 1.45;
+        }
+
+        .admin-pill {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 26px;
+          padding: 5px 9px;
+          border-radius: 999px;
+          font-size: 12px;
+          font-weight: 800;
+          white-space: nowrap;
+        }
+
+        .admin-pill--available {
+          background: #dcfce7;
+          color: #166534;
+        }
+
+        .admin-pill--hidden {
+          background: #fee2e2;
+          color: #991b1b;
+        }
+
+        .admin-product-controls {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          margin-top: 14px;
+        }
+
+        .admin-product-controls input,
+        .admin-product-controls select {
+          flex: 1 1 120px;
+          min-width: 0;
+          min-height: 42px;
+          padding: 9px 10px;
+          border: 1px solid #cfd6d2;
+          border-radius: 9px;
+          background: #fff;
+          color: #111;
+        }
+
+        .admin-product-controls .admin-btn {
+          flex: 1 1 100%;
+        }
+
+        .admin-filter-row {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          margin: 4px 0 20px;
+        }
+
+        .admin-filter {
+          min-height: 42px;
+          padding: 9px 14px;
+          border: 1px solid #dfe4e1;
+          border-radius: 10px;
+          background: #fff;
+          color: #111;
+          cursor: pointer;
+          font-weight: 700;
+        }
+
+        .admin-filter--active {
+          background: #111;
+          border-color: #111;
+          color: #fff;
+        }
+
+        .admin-order-list {
+          display: grid;
+          gap: 15px;
+        }
+
+        .admin-order-card {
+          padding: clamp(16px, 2.5vw, 22px);
+          border: 1px solid var(--admin-border);
+          border-radius: 16px;
+          background: #fff;
+          box-shadow: 0 6px 18px rgba(16, 31, 23, .045);
+        }
+
+        .admin-order-title {
+          margin: 0 0 12px;
+          font-size: 18px;
+          letter-spacing: -.02em;
+        }
+
+        .admin-order-info {
+          display: grid;
+          gap: 7px;
+          margin: 8px 0;
+          color: #303735;
+          line-height: 1.5;
+          overflow-wrap: anywhere;
+        }
+
+        .admin-order-info strong {
+          color: #111;
+        }
+
+        .admin-items {
+          margin-top: 15px;
+          padding-top: 14px;
+          border-top: 1px solid #edf0ee;
+        }
+
+        .admin-status-row {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+          flex-wrap: wrap;
+          margin-top: 15px;
+        }
+
+        .admin-status-row select,
+        .admin-payment-box select {
+          min-height: 40px;
+          max-width: 100%;
+          padding: 7px 10px;
+          border: 1px solid #d5dbd7;
+          border-radius: 9px;
+          background: #fff;
+          color: #111;
+        }
+
+        .admin-delivery-box {
+          margin-top: 18px;
+        }
+
+        .admin-delivery-row {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+          gap: 8px;
+          margin-top: 8px;
+        }
+
+        .admin-delivery-row input {
+          width: 100%;
+          min-height: 42px;
+          padding: 9px 10px;
+          border: 1px solid #cfd6d2;
+          border-radius: 9px;
+        }
+
+        .admin-payment-box {
+          margin-top: 12px;
+          padding: 13px;
+          border-radius: 11px;
+          background: #f8f9f8;
+          border: 1px solid var(--admin-border);
+        }
+
+        .admin-payment-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          flex-wrap: wrap;
+        }
+
+        .admin-created {
+          margin: 14px 0 0;
+          color: var(--admin-muted);
+          font-size: 12px;
+          line-height: 1.4;
+        }
+
+        .admin-error {
+          color: #b91c1c;
+        }
+
+        @media (max-width: 980px) {
+          .admin-summary-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .admin-header {
+            align-items: flex-start;
+            flex-direction: column;
+          }
+
+          .admin-header-actions {
+            width: 100%;
+            justify-content: flex-start;
+          }
+        }
+
+        @media (max-width: 680px) {
+          .admin-shell {
+            padding: 10px;
+          }
+
+          .admin-header {
+            padding: 14px;
+            border-radius: 16px;
+          }
+
+          .admin-brand {
+            width: 100%;
+            align-items: flex-start;
+          }
+
+          .admin-logo {
+            width: min(220px, 72vw);
+            height: 52px;
+          }
+
+          .admin-brand-text {
+            display: none;
+          }
+
+          .admin-header-actions {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            width: 100%;
+          }
+
+          .admin-account {
+            min-width: 0;
+            margin: 0;
+          }
+
+          .admin-account strong {
+            max-width: 100%;
+          }
+
+          .admin-header-actions .admin-btn {
+            width: 100%;
+          }
+
+          .admin-summary-grid {
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+          }
+
+          .admin-summary-card {
+            padding: 15px;
+          }
+
+          .admin-section {
+            padding: 15px;
+            border-radius: 15px;
+          }
+
+          .admin-section-head {
+            align-items: flex-start;
+          }
+
+          .admin-section-head > .admin-btn {
+            width: 100%;
+          }
+
+          .admin-filter-row {
+            overflow-x: auto;
+            flex-wrap: nowrap;
+            padding-bottom: 3px;
+            scrollbar-width: none;
+          }
+
+          .admin-filter-row::-webkit-scrollbar {
+            display: none;
+          }
+
+          .admin-filter {
+            flex: 0 0 auto;
+          }
+
+          .admin-delivery-row {
+            grid-template-columns: 1fr;
+          }
+
+          .admin-delivery-row .admin-btn {
+            width: 100%;
+          }
+
+          .admin-status-row {
+            align-items: stretch;
+            flex-direction: column;
+          }
+
+          .admin-status-row select {
+            width: 100%;
+          }
+
+          .admin-payment-row {
+            align-items: stretch;
+            flex-direction: column;
+          }
+
+          .admin-payment-box select {
+            width: 100%;
+          }
+
+          .admin-alert {
+            align-items: flex-start;
+            flex-direction: column;
+          }
+
+          .admin-alert .admin-btn {
+            width: 100%;
+          }
+        }
+
+        @media (max-width: 430px) {
+          .admin-summary-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .admin-logo {
+            width: 200px;
+          }
+
+          .admin-order-card {
+            padding: 14px;
+          }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .admin-btn {
+            transition: none;
+          }
+        }
+      `}</style>
+
+      <header className="admin-header">
+        <div className="admin-brand">
+          <img
+            className="admin-logo"
+            src="/nexsecond-logo.jpg"
+            alt="NexSecond"
+          />
+
+          <div className="admin-brand-text">
+            <strong>Admin</strong>
+            <span>Operations dashboard</span>
+          </div>
+        </div>
+
+        <div className="admin-header-actions">
+          {user && (
+            <div className="admin-account">
+              <span>Signed in as</span>
+              <strong>{user.email}</strong>
+            </div>
+          )}
+
+          <button
+            className="admin-btn"
+            onClick={enableSound}
+          >
+            {soundEnabled ? '🔊 Sound Enabled' : '🔔 Enable Sound'}
+          </button>
+
+          <button
+            className="admin-btn"
+            onClick={fetchOrders}
+          >
+            Refresh Orders
+          </button>
+        </div>
+      </header>
 
       {!user && (
-        <div style={{ maxWidth: '520px', margin: '30px auto', background: '#fff', padding: '28px', borderRadius: '16px', boxShadow: '0 8px 24px rgba(0,0,0,0.08)', textAlign: 'center' }}>
-          <h2 style={{ marginTop: 0 }}>Admin sign-in required</h2>
-          <p style={{ color: '#666', lineHeight: 1.5 }}>Sign in with the Google account that has Admin access to NexSecond.</p>
-          <button onClick={signInWithGoogle} style={{ padding: '12px 18px', borderRadius: '10px', border: '1px solid #ddd', background: '#111', color: '#fff', cursor: 'pointer', fontWeight: '700' }}>Continue with Google</button>
-          {errorMessage && <p style={{ color: '#b91c1c', marginTop: '16px' }}>{errorMessage}</p>}
+        <div className="admin-card admin-login-card">
+          <h2>Admin sign-in required</h2>
+          <p>
+            Sign in with the Google account that has Admin access to NexSecond.
+          </p>
+
+          <button
+            className="admin-btn admin-btn--dark"
+            onClick={signInWithGoogle}
+          >
+            Continue with Google
+          </button>
+
+          {errorMessage && (
+            <p className="admin-error" style={{ marginTop: '16px' }}>
+              {errorMessage}
+            </p>
+          )}
         </div>
       )}
 
-      {/* NEW ORDER ALERT */}
       {newOrderAlert && (
-        <div
-          style={{
-            padding: '15px 18px',
-            margin: '15px 0',
-            borderRadius: '12px',
-            background: '#dcfce7',
-            border: '1px solid #86efac',
-            fontWeight: '600',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '10px',
-            flexWrap: 'wrap',
-          }}
-        >
+        <div className="admin-alert">
           <span>🔔 New order received!</span>
 
           <button
+            className="admin-btn"
             onClick={() => setNewOrderAlert(false)}
-            style={{
-              padding: '7px 12px',
-              borderRadius: '7px',
-              border: '1px solid #ccc',
-              cursor: 'pointer',
-            }}
           >
             Dismiss
           </button>
         </div>
       )}
 
-      {/* SOUND CONTROL */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          margin: '15px 0',
-          flexWrap: 'wrap',
-        }}
-      >
-        <button
-          onClick={enableSound}
-          style={{
-            padding: '10px 14px',
-            borderRadius: '9px',
-            border: '1px solid #ccc',
-            cursor: 'pointer',
-            fontWeight: '600',
-          }}
-        >
-          {soundEnabled
-            ? '🔊 Sound Enabled'
-            : '🔔 Enable Sound'}
-        </button>
+      {user && (
+        <p className="admin-control-note" style={{ margin: '0 2px 16px' }}>
+          Live order updates are enabled.
+        </p>
+      )}
 
-        <span style={{ fontSize: '14px' }}>
-          New-order sound
-        </span>
-      </div>
-
-      {/* SUMMARY CARDS */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns:
-            'repeat(auto-fit, minmax(160px, 1fr))',
-          gap: '15px',
-          margin: '25px 0',
-        }}
-      >
-        <div
-          style={{
-            background: '#fff',
-            padding: '20px',
-            borderRadius: '14px',
-            boxShadow:
-              '0 4px 12px rgba(0,0,0,0.06)',
-          }}
-        >
+      <div className="admin-summary-grid">
+        <div className="admin-card admin-summary-card">
           <strong>Total Orders</strong>
           <h2>{totalOrders}</h2>
         </div>
 
-        <div
-          style={{
-            background: '#fff',
-            padding: '20px',
-            borderRadius: '14px',
-            boxShadow:
-              '0 4px 12px rgba(0,0,0,0.06)',
-          }}
-        >
+        <div className="admin-card admin-summary-card">
           <strong>Pending</strong>
           <h2>{pendingOrders}</h2>
         </div>
 
-        <div
-          style={{
-            background: '#fff',
-            padding: '20px',
-            borderRadius: '14px',
-            boxShadow:
-              '0 4px 12px rgba(0,0,0,0.06)',
-          }}
-        >
+        <div className="admin-card admin-summary-card">
           <strong>Out for Delivery</strong>
           <h2>{outForDeliveryOrders}</h2>
         </div>
 
-        <div
-          style={{
-            background: '#fff',
-            padding: '20px',
-            borderRadius: '14px',
-            boxShadow:
-              '0 4px 12px rgba(0,0,0,0.06)',
-          }}
-        >
+        <div className="admin-card admin-summary-card">
           <strong>Today's Sales</strong>
           <h2>₹{todaySales}</h2>
         </div>
       </div>
 
-      {user && (
-        <p>
-          Logged in as:{' '}
-          <strong>{user.email}</strong>
-        </p>
-      )}
-
-      <button
-        onClick={fetchOrders}
-        style={{
-          padding: '10px 14px',
-          borderRadius: '9px',
-          border: '1px solid #ccc',
-          cursor: 'pointer',
-        }}
-      >
-        Refresh Orders
-      </button>
-
-      {/* INVENTORY */}
-      <div
-        style={{
-          marginTop: '25px',
-          marginBottom: '25px',
-          background: '#fff',
-          border: '1px solid #e5e5e5',
-          borderRadius: '16px',
-          padding: '20px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: '12px',
-            flexWrap: 'wrap',
-          }}
-        >
+      <section className="admin-card admin-section">
+        <div className="admin-section-head">
           <div>
-            <h2 style={{ margin: 0 }}>Inventory</h2>
-            <p style={{ margin: '5px 0 0', color: '#666' }}>
+            <h2>Inventory</h2>
+            <p>
               Restock products and control what customers can order.
             </p>
           </div>
 
           <button
+            className="admin-btn"
             onClick={fetchProducts}
-            style={{
-              padding: '9px 13px',
-              borderRadius: '9px',
-              border: '1px solid #ccc',
-              cursor: 'pointer',
-              fontWeight: '600',
-              background: '#fff',
-            }}
           >
             Refresh Inventory
           </button>
@@ -682,64 +1185,54 @@ const fallbackInterval = null
         {productLoading ? (
           <p>Loading inventory...</p>
         ) : productError ? (
-          <p style={{ color: 'red' }}>Inventory error: {productError}</p>
+          <p className="admin-error">
+            Inventory error: {productError}
+          </p>
         ) : products.length === 0 ? (
           <p>No products found.</p>
         ) : (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-              gap: '12px',
-              marginTop: '18px',
-            }}
-          >
+          <div className="admin-inventory-grid">
             {products.map((product) => {
               const draft = productDrafts[product.id] || {}
-              const stockValue = draft.stock_quantity ?? product.stock_quantity ?? 0
-              const availableValue = draft.is_available ?? product.is_available ?? false
+              const stockValue =
+                draft.stock_quantity ??
+                product.stock_quantity ??
+                0
+              const availableValue =
+                draft.is_available ??
+                product.is_available ??
+                false
 
               return (
                 <div
                   key={product.id}
-                  style={{
-                    border: '1px solid #e5e5e5',
-                    borderRadius: '14px',
-                    padding: '15px',
-                    background: '#fafafa',
-                  }}
+                  className="admin-product-card"
                 >
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      gap: '10px',
-                      alignItems: 'flex-start',
-                    }}
-                  >
+                  <div className="admin-product-top">
                     <div>
-                      <strong>{product.emoji || '🛒'} {product.name}</strong>
-                      <div style={{ marginTop: '4px', color: '#666', fontSize: '13px' }}>
-                        {product.category || 'Uncategorized'} · ₹{product.price} {product.unit ? `· ${product.unit}` : ''}
+                      <strong>
+                        {product.emoji || '🛒'} {product.name}
+                      </strong>
+
+                      <div className="admin-product-meta">
+                        {product.category || 'Uncategorized'} · ₹
+                        {product.price}
+                        {product.unit ? ` · ${product.unit}` : ''}
                       </div>
                     </div>
 
                     <span
-                      style={{
-                        padding: '5px 8px',
-                        borderRadius: '999px',
-                        fontSize: '12px',
-                        fontWeight: '700',
-                        background: availableValue ? '#dcfce7' : '#fee2e2',
-                        color: availableValue ? '#166534' : '#991b1b',
-                        whiteSpace: 'nowrap',
-                      }}
+                      className={`admin-pill ${
+                        availableValue
+                          ? 'admin-pill--available'
+                          : 'admin-pill--hidden'
+                      }`}
                     >
                       {availableValue ? 'Available' : 'Hidden'}
                     </span>
                   </div>
 
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '14px' }}>
+                  <div className="admin-product-controls">
                     <input
                       type="number"
                       min="0"
@@ -747,47 +1240,41 @@ const fallbackInterval = null
                       inputMode="numeric"
                       value={stockValue}
                       onChange={(e) =>
-                        updateProductDraft(product.id, 'stock_quantity', e.target.value)
+                        updateProductDraft(
+                          product.id,
+                          'stock_quantity',
+                          e.target.value
+                        )
                       }
-                      style={{
-                        flex: '1 1 110px',
-                        minWidth: '0',
-                        padding: '9px',
-                        borderRadius: '8px',
-                        border: '1px solid #ccc',
-                        boxSizing: 'border-box',
-                      }}
                     />
 
                     <select
-                      value={availableValue ? 'available' : 'hidden'}
-                      onChange={(e) =>
-                        updateProductDraft(product.id, 'is_available', e.target.value === 'available')
+                      value={
+                        availableValue
+                          ? 'available'
+                          : 'hidden'
                       }
-                      style={{
-                        flex: '1 1 110px',
-                        padding: '9px',
-                        borderRadius: '8px',
-                        border: '1px solid #ccc',
-                        background: '#fff',
-                      }}
+                      onChange={(e) =>
+                        updateProductDraft(
+                          product.id,
+                          'is_available',
+                          e.target.value === 'available'
+                        )
+                      }
                     >
-                      <option value="available">Available</option>
-                      <option value="hidden">Hidden</option>
+                      <option value="available">
+                        Available
+                      </option>
+                      <option value="hidden">
+                        Hidden
+                      </option>
                     </select>
 
                     <button
-                      onClick={() => updateProductInventory(product)}
-                      style={{
-                        flex: '1 1 100%',
-                        padding: '9px 12px',
-                        borderRadius: '8px',
-                        border: '1px solid #111',
-                        background: '#111',
-                        color: '#fff',
-                        cursor: 'pointer',
-                        fontWeight: '600',
-                      }}
+                      className="admin-btn admin-btn--dark"
+                      onClick={() =>
+                        updateProductInventory(product)
+                      }
                     >
                       Save Inventory
                     </button>
@@ -797,70 +1284,61 @@ const fallbackInterval = null
             })}
           </div>
         )}
-      </div>
+      </section>
 
       {loading ? (
         <p>Loading orders...</p>
       ) : errorMessage ? (
-        <p style={{ color: 'red' }}>
+        <p className="admin-error">
           Admin error: {errorMessage}
         </p>
       ) : orders.length === 0 ? (
-        <p>No orders found.</p>
+        <div className="admin-card admin-section">
+          <p style={{ margin: 0 }}>No orders found.</p>
+        </div>
       ) : (
-        <div>
-          {/* STATUS FILTERS */}
-          <div
-            style={{
-              display: 'flex',
-              gap: '10px',
-              flexWrap: 'wrap',
-              margin: '25px 0',
-            }}
-          >
+        <section className="admin-card admin-section">
+          <div className="admin-section-head">
+            <div>
+              <h2>Orders</h2>
+              <p>Manage status, delivery and payment.</p>
+            </div>
+
+            <button
+              className="admin-btn"
+              onClick={fetchOrders}
+            >
+              Refresh Orders
+            </button>
+          </div>
+
+          <div className="admin-filter-row">
             {[
               ['all', 'All'],
               ['pending', 'Pending'],
               ['confirmed', 'Confirmed'],
               ['preparing', 'Preparing'],
-              [
-                'out_for_delivery',
-                'Out for Delivery',
-              ],
+              ['out_for_delivery', 'Out for Delivery'],
               ['delivered', 'Delivered'],
             ].map(([status, label]) => {
               const count =
                 status === 'all'
                   ? orders.length
                   : orders.filter(
-                      (order) =>
-                        order.status === status
+                      (order) => order.status === status
                     ).length
 
               return (
                 <button
                   key={status}
+                  className={`admin-filter ${
+                    selectedStatus === status
+                      ? 'admin-filter--active'
+                      : ''
+                  }`}
                   onClick={() =>
                     setSelectedStatus(status)
                   }
-                  style={{
-                    padding: '10px 16px',
-                    borderRadius: '10px',
-                    border: '1px solid #ddd',
-                    cursor: 'pointer',
-                    fontWeight:
-                      selectedStatus === status
-                        ? '700'
-                        : '500',
-                    background:
-                      selectedStatus === status
-                        ? '#111'
-                        : '#fff',
-                    color:
-                      selectedStatus === status
-                        ? '#fff'
-                        : '#111',
-                  }}
                 >
                   {label} ({count})
                 </button>
@@ -868,8 +1346,7 @@ const fallbackInterval = null
             })}
           </div>
 
-          {/* ORDERS */}
-          <div style={{ marginTop: '30px' }}>
+          <div className="admin-order-list">
             {orders
               .filter(
                 (order) =>
@@ -891,107 +1368,116 @@ const fallbackInterval = null
                   ''
 
                 return (
-                  <div
+                  <article
                     key={order.id}
-                    style={{
-                      border: '1px solid #ddd',
-                      borderRadius: '14px',
-                      padding: '20px',
-                      marginBottom: '15px',
-                      boxShadow:
-                        '0 4px 12px rgba(0,0,0,0.06)',
-                      background: '#fff',
-                    }}
+                    className="admin-order-card"
                   >
-                    <h3>
+                    <h3 className="admin-order-title">
                       {order.order_id}
                     </h3>
 
-                    <p>
-                      <strong>Customer:</strong>{' '}
-                      {order.customer_name}
-                    </p>
+                    <div className="admin-order-info">
+                      <div>
+                        <strong>Customer:</strong>{' '}
+                        {order.customer_name}
+                      </div>
 
-                    <p>
-                      <strong>Phone:</strong>{' '}
-                      {order.customer_phone}
-                    </p>
+                      <div>
+                        <strong>Phone:</strong>{' '}
+                        {order.customer_phone}
+                      </div>
 
-                    <p>
-                      <strong>Address:</strong>{' '}
-                      {order.delivery_address}
-                    </p>
-                    <div style={{ marginTop: '8px' }}>
-  <button
-    onClick={() => {
-      const address = order.delivery_address || ''
+                      <div>
+                        <strong>Address:</strong>{' '}
+                        {order.delivery_address}
+                      </div>
+                    </div>
 
-      if (!address.trim()) {
-        alert('Delivery address is not available.')
-        return
-      }
+                    <button
+                      className="admin-btn"
+                      onClick={() => {
+                        const address =
+                          order.delivery_address || ''
 
-      const latitude = Number(order.latitude)
-      const longitude = Number(order.longitude)
-      const hasCoordinates = Number.isFinite(latitude) && Number.isFinite(longitude)
-      const mapsQuery = hasCoordinates ? `${latitude},${longitude}` : address
+                        if (!address.trim()) {
+                          alert(
+                            'Delivery address is not available.'
+                          )
+                          return
+                        }
 
-      const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-        mapsQuery
-      )}`
+                        const latitude = Number(
+                          order.latitude
+                        )
+                        const longitude = Number(
+                          order.longitude
+                        )
 
-      window.open(mapsUrl, '_blank')
-    }}
-    style={{
-      padding: '8px 12px',
-      borderRadius: '8px',
-      border: '1px solid #ccc',
-      cursor: 'pointer',
-      fontWeight: '600',
-    }}
-  >
-    📍 Open in Google Maps
-  </button>
-</div>
+                        const hasCoordinates =
+                          Number.isFinite(latitude) &&
+                          Number.isFinite(longitude)
 
-                    {/* ITEMS */}
-                    <div
-                      style={{
-                        marginTop: '15px',
+                        const mapsQuery =
+                          hasCoordinates
+                            ? `${latitude},${longitude}`
+                            : address
+
+                        const mapsUrl =
+                          `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                            mapsQuery
+                          )}`
+
+                        window.open(
+                          mapsUrl,
+                          '_blank'
+                        )
                       }}
+                      style={{ marginTop: '8px' }}
                     >
-                      <strong>Items:</strong>
+                      📍 Open in Google Maps
+                    </button>
+
+                    <div className="admin-items">
+                      <strong>Items</strong>
 
                       {order.items?.map(
                         (item, index) => (
                           <div
                             key={index}
                             style={{
-                              marginTop: '4px',
+                              marginTop: '5px',
+                              display: 'flex',
+                              justifyContent:
+                                'space-between',
+                              gap: '12px',
+                              flexWrap: 'wrap',
                             }}
                           >
-                            {item.name} ×{' '}
-                            {item.quantity} — ₹
-                            {item.total_price}
+                            <span>
+                              {item.name} ×{' '}
+                              {item.quantity}
+                            </span>
+
+                            <strong>
+                              ₹{item.total_price}
+                            </strong>
                           </div>
                         )
                       )}
                     </div>
 
-                    {/* STATUS */}
-                    <div
-                      style={{
-                        marginTop: '15px',
-                      }}
-                    >
-                      <strong>Status:</strong>{' '}
+                    <div className="admin-status-row">
+                      <strong>Status:</strong>
 
                       <span
                         style={{
-                          display: 'inline-block',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          minHeight: '30px',
                           padding: '6px 12px',
                           borderRadius: '20px',
-                          fontWeight: '600',
+                          fontWeight: '700',
                           background:
                             order.status === 'pending'
                               ? '#fff3cd'
@@ -1037,54 +1523,31 @@ const fallbackInterval = null
                             e.target.value
                           )
                         }
-                        style={{
-                          marginLeft: '10px',
-                          padding: '6px 10px',
-                          borderRadius: '8px',
-                          border: '1px solid #ddd',
-                          maxWidth: '100%',
-                        }}
                       >
                         <option value="pending">
                           Pending
                         </option>
-
                         <option value="confirmed">
                           Confirmed
                         </option>
-
                         <option value="preparing">
                           Preparing
                         </option>
-
                         <option value="out_for_delivery">
                           Out for Delivery
                         </option>
-
                         <option value="delivered">
                           Delivered
                         </option>
                       </select>
                     </div>
 
-                    {/* DELIVERY PARTNER */}
-                    <div
-                      style={{
-                        marginTop: '18px',
-                      }}
-                    >
+                    <div className="admin-delivery-box">
                       <strong>
                         Delivery Partner
                       </strong>
 
-                      <div
-                        style={{
-                          display: 'flex',
-                          gap: '8px',
-                          flexWrap: 'wrap',
-                          marginTop: '8px',
-                        }}
-                      >
+                      <div className="admin-delivery-row">
                         <input
                           type="text"
                           placeholder="Partner name"
@@ -1104,13 +1567,6 @@ const fallbackInterval = null
                               e.target.value
                             )
                           }
-                          style={{
-                            flex: '1 1 180px',
-                            minWidth: '0',
-                            padding: '9px',
-                            boxSizing:
-                              'border-box',
-                          }}
                         />
 
                         <input
@@ -1133,108 +1589,89 @@ const fallbackInterval = null
                               e.target.value
                             )
                           }
-                          style={{
-                            flex: '1 1 180px',
-                            minWidth: '0',
-                            padding: '9px',
-                            boxSizing:
-                              'border-box',
-                          }}
                         />
 
                         <button
+                          className="admin-btn"
                           onClick={() =>
-                            assignDeliveryPartner(
-                              order
-                            )
+                            assignDeliveryPartner(order)
                           }
-                          style={{
-                            padding: '9px 14px',
-                            borderRadius: '8px',
-                            border:
-                              '1px solid #ccc',
-                            cursor: 'pointer',
-                          }}
                         >
                           Save
                         </button>
                       </div>
                     </div>
 
-                    <p>
+                    <p style={{ margin: '14px 0 0' }}>
                       <strong>Total:</strong> ₹
                       {order.total_amount}
                     </p>
 
-                    <div
-                      style={{
-                        marginTop: '12px',
-                        padding: '12px',
-                        borderRadius: '10px',
-                        background: '#f8f8f8',
-                        border: '1px solid #e5e5e5',
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: '12px',
-                          flexWrap: 'wrap',
-                        }}
-                      >
+                    <div className="admin-payment-box">
+                      <div className="admin-payment-row">
                         <div>
                           <strong>Payment</strong>
-                          <div style={{ marginTop: '4px' }}>
-                            {order.payment_method === 'cash_on_delivery'
+                          <div
+                            style={{
+                              marginTop: '4px',
+                            }}
+                          >
+                            {order.payment_method ===
+                            'cash_on_delivery'
                               ? '💵 Cash on Delivery (COD)'
-                              : order.payment_method || 'Not specified'}
+                              : order.payment_method ||
+                                'Not specified'}
                           </div>
                         </div>
 
                         <select
-                          value={order.payment_status || 'pending'}
+                          value={
+                            order.payment_status ||
+                            'pending'
+                          }
                           onChange={(e) =>
                             updatePaymentStatus(
                               order.id,
                               e.target.value
                             )
                           }
-                          style={{
-                            padding: '8px 10px',
-                            borderRadius: '8px',
-                            border: '1px solid #ccc',
-                            background: '#fff',
-                            cursor: 'pointer',
-                            minWidth: '120px',
-                          }}
                         >
-                          <option value="pending">Pending</option>
-                          <option value="paid">Paid</option>
-                          <option value="failed">Failed</option>
-                          <option value="refunded">Refunded</option>
+                          <option value="pending">
+                            Pending
+                          </option>
+                          <option value="paid">
+                            Paid
+                          </option>
+                          <option value="failed">
+                            Failed
+                          </option>
+                          <option value="refunded">
+                            Refunded
+                          </option>
                         </select>
                       </div>
                     </div>
 
-                    <p>
-  <strong>Created:</strong>{' '}
-  {new Date(order.created_at).toLocaleString('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
-  })}
-</p>
-                  </div>
+                    <p className="admin-created">
+                      <strong>Created:</strong>{' '}
+                      {new Date(
+                        order.created_at
+                      ).toLocaleString('en-IN', {
+                        timeZone:
+                          'Asia/Kolkata',
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: true,
+                      })}
+                    </p>
+                  </article>
                 )
               })}
           </div>
-        </div>
+        </section>
       )}
     </div>
   )

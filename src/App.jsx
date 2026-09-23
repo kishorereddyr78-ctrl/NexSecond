@@ -64,6 +64,7 @@ function App() {
   const [notification, setNotification] = useState('')
   const notificationTimerRef = useRef(null)
   const [showLocationPermissionPrompt, setShowLocationPermissionPrompt] = useState(false)
+  const [showCheckoutLocationPrompt, setShowCheckoutLocationPrompt] = useState(false)
   const [locationAccuracy, setLocationAccuracy] = useState(
     localStorage.getItem('nexsecond_location_accuracy')
       ? Number(localStorage.getItem('nexsecond_location_accuracy'))
@@ -106,93 +107,243 @@ function App() {
       : null
   )
 
-  const getCurrentLocation = () => {
+  const [deliveryServiceability, setDeliveryServiceability] = useState(null)
+  const [deliveryServiceabilityLoading, setDeliveryServiceabilityLoading] = useState(false)
+
+  const clearExactLocation = () => {
+    setUserLatitude(null)
+    setUserLongitude(null)
+    setLocationAccuracy(null)
+    setDeliveryServiceability(null)
+
+    localStorage.removeItem('nexsecond_latitude')
+    localStorage.removeItem('nexsecond_longitude')
+    localStorage.removeItem('nexsecond_location_accuracy')
+  }
+
+  const checkDeliveryServiceability = async (latitude, longitude, showResult = false) => {
+    if (latitude == null || longitude == null) {
+      setDeliveryServiceability(null)
+      if (showResult) {
+        showNotification('Please set your exact location to check delivery availability.')
+      }
+      return null
+    }
+
+    setDeliveryServiceabilityLoading(true)
+
+    const { data, error } = await supabase.rpc('check_nexsecond_delivery_area', {
+      p_latitude: latitude,
+      p_longitude: longitude,
+    })
+
+    setDeliveryServiceabilityLoading(false)
+
+    if (error) {
+      console.error('Delivery area check error:', error)
+      setDeliveryServiceability(null)
+      if (showResult) {
+        showNotification('We could not verify your delivery area. Please try again.')
+      }
+      return null
+    }
+
+    setDeliveryServiceability(data || null)
+
+    if (showResult) {
+      showNotification(
+        data?.is_serviceable
+          ? `Great — NexSecond delivers to ${data?.area_name || 'your location'} ✓`
+          : 'NexSecond is not delivering to this location yet.'
+      )
+    }
+
+    return data || null
+  }
+
+  const captureBestLivePosition = () =>
+    new Promise((resolve) => {
+      if (!navigator.geolocation) {
+        resolve({ position: null, error: null })
+        return
+      }
+
+      let bestPosition = null
+      let watchId = null
+      let finished = false
+
+      const finish = (error = null) => {
+        if (finished) return
+        finished = true
+        if (watchId != null) navigator.geolocation.clearWatch(watchId)
+        resolve({ position: bestPosition, error })
+      }
+
+      const considerPosition = (position) => {
+        if (
+          !bestPosition ||
+          position.coords.accuracy < bestPosition.coords.accuracy
+        ) {
+          bestPosition = position
+        }
+
+        // ~60 m is an excellent browser/device fix. Stop early when we reach it.
+        if (position.coords.accuracy <= 60) finish()
+      }
+
+      const handleError = (error) => {
+        // Keep any useful fix already received; otherwise return the error.
+        finish(bestPosition ? null : error)
+      }
+
+      watchId = navigator.geolocation.watchPosition(
+        considerPosition,
+        handleError,
+        {
+          enableHighAccuracy: true,
+          timeout: 12000,
+          maximumAge: 0,
+        }
+      )
+
+      // Give mobile GPS/Wi-Fi positioning a little time to improve beyond
+      // the browser's first coarse fix, then keep the best reading we saw.
+      window.setTimeout(() => finish(), 12000)
+    })
+
+  const refreshLiveLocationAndCheck = async (showResult = false) => {
+    if (!navigator.geolocation) {
+      setDeliveryServiceability(null)
+      if (showResult) {
+        showNotification('Location is not supported by your browser.')
+      }
+      return null
+    }
+
+    setDeliveryServiceabilityLoading(true)
+
+    const { position, error } = await captureBestLivePosition()
+
+    if (!position) {
+      console.error('Live location check error:', error)
+      setDeliveryServiceabilityLoading(false)
+      setDeliveryServiceability(null)
+
+      if (showResult) {
+        const message =
+          error?.code === 1
+            ? 'Location permission was denied. Allow location to verify delivery.'
+            : error?.code === 2
+            ? 'Your current location could not be determined. Please try again.'
+            : 'Live location could not be verified. Please try again.'
+        showNotification(message)
+      }
+
+      return null
+    }
+
+    const { latitude, longitude, accuracy } = position.coords
+
+    setUserLatitude(latitude)
+    setUserLongitude(longitude)
+    setLocationAccuracy(accuracy)
+
+    localStorage.setItem('nexsecond_latitude', String(latitude))
+    localStorage.setItem('nexsecond_longitude', String(longitude))
+    localStorage.setItem('nexsecond_location_accuracy', String(accuracy))
+
+    const serviceability = await checkDeliveryServiceability(
+      latitude,
+      longitude,
+      false
+    )
+
+    setDeliveryServiceabilityLoading(false)
+
+    if (showResult) {
+      if (!serviceability?.is_serviceable) {
+        showNotification('This exact location is outside the NexSecond delivery boundary.')
+      } else if (accuracy <= 100) {
+        showNotification(`Precise location verified (±${Math.round(accuracy)} m) 📍`)
+      } else {
+        showNotification(
+          `Location found (±${Math.round(accuracy)} m). Tap again for better GPS accuracy.`
+        )
+      }
+    }
+
+    return {
+      latitude,
+      longitude,
+      accuracy,
+      serviceability,
+    }
+  }
+
+  const getCurrentLocation = async () => {
     if (!navigator.geolocation) {
       showNotification('Location is not supported by your browser.')
-      return
+      return null
     }
 
     setIsDetectingLocation(true)
-    showNotification('Detecting your precise location… 📍')
+    showNotification('Finding your most accurate current location… 📍')
 
-    const handlePosition = (position) => {
-      const { latitude, longitude, accuracy } = position.coords
+    const liveLocation = await refreshLiveLocationAndCheck(false)
 
-      setUserLatitude(latitude)
-      setUserLongitude(longitude)
-      setLocationAccuracy(accuracy)
+    if (!liveLocation) {
+      setIsDetectingLocation(false)
+      return null
+    }
 
-      localStorage.setItem('nexsecond_latitude', String(latitude))
-      localStorage.setItem('nexsecond_longitude', String(longitude))
-      localStorage.setItem('nexsecond_location_accuracy', String(accuracy))
+    const { latitude, longitude, accuracy, serviceability } = liveLocation
 
-      fetch(
+    try {
+      const response = await fetch(
         `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`,
         { headers: { Accept: 'application/json' } }
       )
-        .then((res) => {
-          if (!res.ok) throw new Error('Reverse geocoding failed')
-          return res.json()
-        })
-        .then((data) => {
-          const address = data.address || {}
-          const area =
-            address.suburb ||
-            address.neighbourhood ||
-            address.village ||
-            address.town ||
-            address.city_district ||
-            address.city ||
-            'Location detected 📍'
 
-          setLocation(area)
-          localStorage.setItem('nexsecond_location', area)
-          localStorage.setItem('nexsecond_location_prompt_asked', 'true')
-          setIsLocationOpen(false)
-          setShowLocationPermissionPrompt(false)
+      if (!response.ok) throw new Error('Reverse geocoding failed')
 
-          const accuracyText = Math.round(accuracy)
-          showNotification(
-            accuracy <= 100
-              ? `Precise location detected (±${accuracyText} m) 📍`
-              : `Location detected (±${accuracyText} m). You can retry for better accuracy.`
-          )
-        })
-        .catch((error) => {
-          console.error('Reverse geocoding error:', error)
-          setLocation('Current location 📍')
-          setIsLocationOpen(false)
-          setShowLocationPermissionPrompt(false)
-          showNotification(
-            `Location captured (±${Math.round(accuracy)} m) 📍`
-          )
-        })
-        .finally(() => setIsDetectingLocation(false))
+      const data = await response.json()
+      const address = data.address || {}
+      const area =
+        address.suburb ||
+        address.neighbourhood ||
+        address.village ||
+        address.town ||
+        address.city_district ||
+        address.city ||
+        'Current location 📍'
+
+      setLocation(area)
+      localStorage.setItem('nexsecond_location', area)
+      localStorage.setItem('nexsecond_location_prompt_asked', 'true')
+    } catch (error) {
+      console.error('Reverse geocoding error:', error)
+      setLocation('Current location 📍')
     }
 
-    const handleError = (error) => {
-      console.error('Location error:', error)
-      setIsDetectingLocation(false)
+    setShowLocationPermissionPrompt(false)
+    setIsDetectingLocation(false)
 
-      const message =
-        error.code === 1
-          ? 'Location permission was denied. You can choose an area manually.'
-          : error.code === 2
-          ? 'Your location could not be determined. Please try again.'
-          : 'Location detection timed out. Please try again.'
-
-      showNotification(message)
+    if (serviceability?.is_serviceable && accuracy <= 100) {
+      setIsLocationOpen(false)
+      showNotification(`Precise location verified (±${Math.round(accuracy)} m) 📍`)
+    } else if (serviceability?.is_serviceable) {
+      setIsLocationOpen(true)
+      showNotification(
+        `Location found (±${Math.round(accuracy)} m). For reliable boundary verification, tap current location again.`
+      )
+    } else {
+      setIsLocationOpen(true)
+      showNotification(
+        'Location detected, but NexSecond does not deliver to this exact location yet.'
+      )
     }
 
-    navigator.geolocation.getCurrentPosition(
-      handlePosition,
-      handleError,
-      {
-        enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 0,
-      }
-    )
+    return liveLocation
   }
 
   useEffect(() => {
@@ -245,6 +396,7 @@ function App() {
   const [selectedProduct, setSelectedProduct] = useState(null)
   const [launchPromotion, setLaunchPromotion] = useState(null)
   const [launchPromotionLoading, setLaunchPromotionLoading] = useState(true)
+  const launchPromotionRef = useRef(null)
 
   useEffect(() => {
     if (otpCooldown <= 0) return
@@ -404,26 +556,58 @@ function App() {
     fetchProducts()
   }, [])
 
-  const fetchLaunchPromotion = async () => {
-    setLaunchPromotionLoading(true)
-
-    const { data, error } = await supabase.rpc('get_launch_promotion')
-
-    if (error) {
-      console.error('Launch promotion error:', error)
-      setLaunchPromotion(null)
-    } else {
-      setLaunchPromotion(data || null)
+  const fetchLaunchPromotion = async (showLoading = false) => {
+    if (showLoading) {
+      setLaunchPromotionLoading(true)
     }
 
-    setLaunchPromotionLoading(false)
+    try {
+      const { data, error } = await supabase.rpc('get_launch_promotion')
+
+      if (error) {
+        console.error('Launch promotion error:', error)
+
+        // Never blank the existing customer UI during a background refresh.
+        if (!launchPromotionRef.current) {
+          launchPromotionRef.current = null
+          setLaunchPromotion(null)
+        }
+
+        return
+      }
+
+      const nextPromotion = data || null
+      const currentPromotion = launchPromotionRef.current
+
+      // Only update React state when the actual promotion data changed.
+      // This keeps the 30-second sync completely silent to customers.
+      if (
+        JSON.stringify(nextPromotion) !==
+        JSON.stringify(currentPromotion)
+      ) {
+        launchPromotionRef.current = nextPromotion
+        setLaunchPromotion(nextPromotion)
+      }
+    } catch (error) {
+      console.error('Launch promotion refresh failed:', error)
+
+      // Preserve the last known customer-facing promotion.
+      if (!launchPromotionRef.current) {
+        launchPromotionRef.current = null
+        setLaunchPromotion(null)
+      }
+    } finally {
+      if (showLoading) {
+        setLaunchPromotionLoading(false)
+      }
+    }
   }
 
   useEffect(() => {
-    fetchLaunchPromotion()
+    fetchLaunchPromotion(true)
 
     const interval = setInterval(() => {
-      fetchLaunchPromotion()
+      fetchLaunchPromotion(false)
     }, 30000)
 
     return () => clearInterval(interval)
@@ -759,6 +943,24 @@ if (stock <= 0) {
       ? Number(checkoutQuote.delivery_fee ?? 0)
       : null
 
+  const quotedDeliveryFeeBeforeDiscount =
+    checkoutQuote != null
+      ? Number(
+          checkoutQuote.delivery_fee_before_discount ??
+            quotedDeliveryFee ??
+            0
+        )
+      : null
+
+  const deliveryDiscountAmount = Math.max(
+    0,
+    Number(quotedDeliveryFeeBeforeDiscount ?? 0) -
+      Number(quotedDeliveryFee ?? 0)
+  )
+
+  const totalSavings =
+    Math.max(0, discountAmount) + deliveryDiscountAmount
+
   const quotedHandlingFee =
     checkoutQuote != null
       ? Number(checkoutQuote.handling_fee ?? HANDLING_FEE)
@@ -768,6 +970,23 @@ if (stock <= 0) {
     checkoutQuote != null
       ? Number(checkoutQuote.subtotal ?? cartTotal)
       : cartTotal
+
+  const hasCheckoutBenefit =
+    discountAmount > 0 ||
+    deliveryDiscountAmount > 0 ||
+    quotedSubtotal >= FREE_DELIVERY_THRESHOLD
+
+  const checkoutBenefitTitle =
+    discountAmount > 0 && deliveryDiscountAmount > 0
+      ? `${checkoutQuote?.promotion || 'Offer applied'} + FREE DELIVERY`
+      : discountAmount > 0
+      ? checkoutQuote?.promotion || 'Offer applied'
+      : 'FREE DELIVERY unlocked'
+
+  const checkoutBenefitText =
+    totalSavings > 0
+      ? `You save ₹${totalSavings.toFixed(2)} in total`
+      : 'Your order qualifies for free delivery'
 
   const finalTotal =
     checkoutQuote != null
@@ -821,53 +1040,134 @@ if (stock <= 0) {
     }
   }, [cart, userLatitude, userLongitude, isCheckoutOpen])
 
+  // NEXSECOND MOTION SYSTEM
+  // Uses viewport-aware reveals so movement happens when the customer reaches
+  // a section, not as one long page-load animation. Dynamic product cards are
+  // picked up through MutationObserver after Supabase finishes loading.
+  useEffect(() => {
+    const appRoot = document.querySelector('.app')
+    if (!appRoot) return undefined
+
+    const revealSelector = [
+      '.launch-panel',
+      '.section-heading',
+      '.categories .category',
+      '.products .product-card',
+      '.benefits > div',
+      '.site-footer-main > .footer-column',
+      '.site-footer-bottom',
+    ].join(',')
+
+    const observed = new WeakSet()
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return
+          entry.target.classList.add('ns-inview')
+          observer.unobserve(entry.target)
+        })
+      },
+      {
+        threshold: 0.08,
+        rootMargin: '0px 0px -8% 0px',
+      }
+    )
+
+    const wireRevealTargets = () => {
+      appRoot.querySelectorAll(revealSelector).forEach((element) => {
+        if (observed.has(element)) return
+        observed.add(element)
+
+        const parent = element.parentElement
+        const siblings = parent ? Array.from(parent.children) : []
+        const index = siblings.indexOf(element)
+        const cappedIndex = Math.max(0, Math.min(index, 7))
+        element.style.setProperty('--ns-reveal-delay', `${cappedIndex * 55}ms`)
+        element.classList.add('ns-reveal')
+        observer.observe(element)
+      })
+    }
+
+    wireRevealTargets()
+
+    const mutationObserver = new MutationObserver(wireRevealTargets)
+    mutationObserver.observe(appRoot, { childList: true, subtree: true })
+
+    return () => {
+      mutationObserver.disconnect()
+      observer.disconnect()
+    }
+  }, [])
+
+  // Header depth changes subtly as the customer scrolls.
+  useEffect(() => {
+    const header = document.querySelector('.header')
+    if (!header) return undefined
+
+    const updateHeader = () => {
+      header.classList.toggle('is-scrolled', window.scrollY > 18)
+    }
+
+    updateHeader()
+    window.addEventListener('scroll', updateHeader, { passive: true })
+
+    return () => window.removeEventListener('scroll', updateHeader)
+  }, [])
+
+  // Cart badge gets a single physical response whenever quantity changes.
+  useEffect(() => {
+    const badge = document.querySelector('.cart b')
+    if (!badge || cartCount <= 0) return
+
+    badge.classList.remove('ns-cart-bump')
+    void badge.offsetWidth
+    badge.classList.add('ns-cart-bump')
+  }, [cartCount])
+
   return (
     <div className="app">
 
       {/* NOTIFICATION */}
       {notification && (
-        <div
-          style={{
-            position: 'fixed',
-            top: '24px',
-            right: '24px',
-            zIndex: 9999,
-            background: '#111',
-            color: '#fff',
-            padding: '14px 20px',
-            borderRadius: '12px',
-            boxShadow: '0 10px 30px rgba(0,0,0,0.18)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px',
-            fontSize: '15px',
-            fontWeight: '600',
-          }}
-        >
-          <span
-            style={{
-              width: '24px',
-              height: '24px',
-              borderRadius: '50%',
-              background: '#fff',
-              color: '#111',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '14px',
-              fontWeight: '800',
-            }}
-          >
-            ✓
-          </span>
-
-          {notification}
+        <div className="ns-notification" role="status" aria-live="polite">
+          <span className="ns-notification__icon">✓</span>
+          <span className="ns-notification__text">{notification}</span>
         </div>
       )}
 
       {/* HEADER */}
       <header className="header">
         <div className="logo">NexSecond<span>.</span></div>
+
+        <div className="mobile-quick-actions" aria-label="Quick actions">
+          <button
+            type="button"
+            className="mobile-quick-location"
+            onClick={() => setIsLocationOpen(true)}
+          >
+            <NexIcon name="location" size={17} strokeWidth={2.1} />
+            <span>{location}</span>
+            <span className="mobile-quick-chevron" aria-hidden="true">⌄</span>
+          </button>
+
+          <button
+            type="button"
+            className="mobile-menu-button"
+            aria-label={user ? 'Open account menu' : 'Open login'}
+            onClick={() => {
+              if (user) {
+                setIsAccountOpen((open) => !open)
+              } else {
+                setIsLoginOpen(true)
+              }
+            }}
+          >
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
+        </div>
 
         <button
           className="location"
@@ -962,53 +1262,65 @@ if (stock <= 0) {
 
       <div className="mobile-actions">
         <button
+          className="mobile-action mobile-nav-active"
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          aria-label="Go to home"
+        >
+          <svg className="mobile-nav-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M3.5 10.8 12 3.8l8.5 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M5.5 9.8V20h13V9.8" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+            <path d="M9.5 20v-5h5v5" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+          </svg>
+          <small>Home</small>
+        </button>
+
+        <button
           className="mobile-action"
           onClick={() => {
-            if (user) {
-              setIsAccountOpen((open) => !open)
-            } else {
-              setIsLoginOpen(true)
-            }
+            const input = document.querySelector('.search-container .search')
+            input?.focus()
+            input?.scrollIntoView({ behavior: 'smooth', block: 'center' })
           }}
+          aria-label="Search products"
         >
-          <NexIcon name="user" size={19} strokeWidth={2} />
-          <small>{user ? 'Account' : 'Login'}</small>
+          <NexIcon name="search" size={19} strokeWidth={2.1} />
+          <small>Search</small>
         </button>
 
         <button
           className="mobile-action"
-          onClick={async () => {
-            if (!user) {
-              setIsLoginOpen(true)
-              return
-            }
-            setIsOrderHistoryOpen(true)
-            fetchOrderHistory()
+          onClick={() => {
+            document.querySelector('.categories-section, .categories')?.scrollIntoView({
+              behavior: 'smooth',
+              block: 'start',
+            })
           }}
+          aria-label="Browse categories"
         >
-          <NexIcon name="orders" size={19} strokeWidth={2} />
-          <small>Orders</small>
+          <svg className="mobile-nav-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="4" y="4" width="6" height="6" rx="1.3" stroke="currentColor" strokeWidth="2" />
+            <rect x="14" y="4" width="6" height="6" rx="1.3" stroke="currentColor" strokeWidth="2" />
+            <rect x="4" y="14" width="6" height="6" rx="1.3" stroke="currentColor" strokeWidth="2" />
+            <rect x="14" y="14" width="6" height="6" rx="1.3" stroke="currentColor" strokeWidth="2" />
+          </svg>
+          <small>Categories</small>
         </button>
 
         <button
-          className="mobile-action"
-          onClick={() => setIsLocationOpen(true)}
-        >
-          <NexIcon name="location" size={19} strokeWidth={2} />
-          <small>Location</small>
-        </button>
-
-        <button
-          className="mobile-action"
+          className="mobile-action mobile-cart-action"
           onClick={() => setIsCartOpen(true)}
+          aria-label={`Open cart with ${cartCount} item${cartCount === 1 ? '' : 's'}`}
         >
-          <NexIcon name="cart" size={19} strokeWidth={2} />
-          <small>Cart ({cartCount})</small>
+          <span className="mobile-cart-icon-wrap">
+            <NexIcon name="cart" size={20} strokeWidth={2.1} />
+            <span className="mobile-cart-count" aria-hidden="true">{cartCount}</span>
+          </span>
+          <small>Cart</small>
         </button>
       </div>
 
       {/* HERO */}
-      <section className="hero-section">
+      <section className="hero-section hero-refined" aria-label="NexSecond quick delivery">
         <div className="hero-content">
           <p className="tag">
             <span className="tag-mark">
@@ -1029,38 +1341,88 @@ if (stock <= 0) {
           </p>
 
           <button
-            className="shop-btn"
+            className="shop-btn hero-refined-cta"
             onClick={() =>
               document.querySelector('.products-section')
                 ?.scrollIntoView({ behavior: 'smooth' })
             }
           >
-            Shop now →
+            Shop now <span aria-hidden="true">→</span>
           </button>
+
+          <div className="hero-proof-row" aria-label="NexSecond service highlights">
+            <div className="hero-proof-item">
+              <span className="hero-proof-icon"><NexIcon name="truck" size={16} strokeWidth={2.1} /></span>
+              <span><strong>Fast delivery</strong><small>Local service</small></span>
+            </div>
+            <div className="hero-proof-item">
+              <span className="hero-proof-icon"><NexIcon name="orders" size={16} strokeWidth={2.1} /></span>
+              <span><strong>Fresh essentials</strong><small>Picked for you</small></span>
+            </div>
+            <div className="hero-proof-item">
+              <span className="hero-proof-icon"><NexIcon name="location" size={16} strokeWidth={2.1} /></span>
+              <span><strong>Inside your area</strong><small>Boundary verified</small></span>
+            </div>
+          </div>
         </div>
 
-        <div className="hero-visual">
-          <div className="delivery-badge">
-            <span className="delivery-badge-icon">
-              <NexIcon name="truck" size={18} strokeWidth={2.2} />
-            </span>
-            <div>
-              <strong>Fast Delivery</strong>
-              <span>Right to your door</span>
+        <div className="hero-visual hero-refined-visual" aria-hidden="true">
+          <div className="hero-refined-glow"></div>
+          <div className="hero-refined-halo hero-refined-halo--one"></div>
+          <div className="hero-refined-halo hero-refined-halo--two"></div>
+
+          <div className="hero-command-card">
+            <div className="hero-command-head">
+              <div>
+                <span className="hero-command-kicker">NEXSECOND</span>
+                <strong>Local delivery, simplified.</strong>
+              </div>
+              <span className="hero-command-live"><i></i> LIVE</span>
+            </div>
+
+            <div className="hero-command-route">
+              <div className="hero-route-point hero-route-point--start">
+                <span className="hero-route-dot"></span>
+                <div>
+                  <small>ORDER</small>
+                  <strong>Picked</strong>
+                </div>
+              </div>
+              <div className="hero-route-line"><span></span></div>
+              <div className="hero-route-point hero-route-point--end">
+                <span className="hero-route-pin"><NexIcon name="location" size={14} strokeWidth={2.2} /></span>
+                <div>
+                  <small>DESTINATION</small>
+                  <strong>Your area</strong>
+                </div>
+              </div>
+            </div>
+
+            <div className="hero-command-status">
+              <div className="hero-command-status-icon">
+                <NexIcon name="cart" size={24} strokeWidth={1.9} />
+              </div>
+              <div>
+                <strong>Everyday essentials</strong>
+                <span>Fast, local and easy to order.</span>
+              </div>
+              <span className="hero-command-arrow">→</span>
+            </div>
+
+            <div className="hero-command-footer">
+              <span><NexIcon name="truck" size={13} strokeWidth={2.1} /> Local delivery</span>
+              <span><b>₹169+</b> free delivery</span>
             </div>
           </div>
 
-          <div className="hero-art">
-            <div className="hero-art-orbit hero-art-orbit--one"></div>
-            <div className="hero-art-orbit hero-art-orbit--two"></div>
+          <div className="hero-float-chip hero-float-chip--top">
+            <span className="hero-float-chip__dot"></span>
+            <div><small>READY</small><strong>Essentials packed</strong></div>
+          </div>
 
-            <div className="hero-art-card hero-art-card--main">
-              <NexIcon name="cart" size={72} strokeWidth={1.6} />
-            </div>
-
-            <div className="hero-art-card hero-art-card--small">
-              <NexIcon name="truck" size={28} strokeWidth={1.8} />
-            </div>
+          <div className="hero-float-chip hero-float-chip--bottom">
+            <NexIcon name="location" size={15} strokeWidth={2.15} />
+            <div><small>SERVICE AREA</small><strong>Exact location checked</strong></div>
           </div>
         </div>
       </section>
@@ -1069,14 +1431,14 @@ if (stock <= 0) {
         <section className="launch-panel" aria-label="NexSecond launch offer">
           <div className="launch-offer">
             <div className="launch-offer-main">
-              <span className="launch-eyebrow">NEXSECOND LAUNCH OFFER</span>
+              <span className="launch-eyebrow">NEXSECOND LAUNCH SAVING</span>
 
               <div className="launch-offer-copy">
                 <strong>{launchDiscountPercent}% off</strong>
                 <span>on orders above ₹{launchDiscountMin.toFixed(0)}</span>
               </div>
 
-              <p>Applied automatically at checkout. No code needed.</p>
+              <p>Your eligible saving is applied automatically at checkout.</p>
             </div>
 
             <button
@@ -1240,13 +1602,21 @@ if (stock <= 0) {
                     </button>
                   ) : (
                     <div className="quantity-control" onClick={(event) => event.stopPropagation()}>
-                      <button onClick={() => decreaseQuantity(product.id)}>
+                      <button
+                        type="button"
+                        aria-label={`Decrease ${product.name} quantity`}
+                        onClick={() => decreaseQuantity(product.id)}
+                      >
                         −
                       </button>
 
-                      <span>{quantity}</span>
+                      <span aria-live="polite">{quantity}</span>
 
-                      <button onClick={() => addToCart(product)}>
+                      <button
+                        type="button"
+                        aria-label={`Increase ${product.name} quantity`}
+                        onClick={() => addToCart(product)}
+                      >
                         +
                       </button>
                     </div>
@@ -1485,8 +1855,9 @@ if (stock <= 0) {
                 <button
                   className="checkout-btn"
                   onClick={() => {
+                    setCheckoutError('')
                     setIsCartOpen(false)
-                    setIsCheckoutOpen(true)
+                    setShowCheckoutLocationPrompt(true)
                   }}
                 >
                   Proceed to Checkout →
@@ -1504,24 +1875,133 @@ if (stock <= 0) {
           <div className="location-permission-card">
             <div className="location-permission-icon">📍</div>
             <span className="location-permission-tag">QUICKER DELIVERY</span>
-            <h2>Allow NexSecond to use your location?</h2>
-            <p>We use your location to help show the right delivery area and make checkout faster.</p>
+            <h2>Set your delivery location</h2>
+            <p>
+              NexSecond uses your current location to check whether we can deliver to your exact spot.
+              Your browser will ask for permission after you tap the button.
+            </p>
+
+            <div className="location-permission-steps">
+              <div><span>1</span><strong>Tap “Enable precise location”</strong></div>
+              <div><span>2</span><strong>When your browser asks, tap “Allow”</strong></div>
+              <div><span>3</span><strong>Wait for the exact location check to finish</strong></div>
+            </div>
 
             <div className="location-permission-benefits">
-              <div>✓ Faster delivery area detection</div>
-              <div>✓ Easier checkout</div>
-              <div>✓ You stay in control of your location</div>
+              <div>✓ Delivery boundary checked using GPS</div>
+              <div>✓ Exact location rechecked before checkout</div>
+              <div>✓ You can update your location anytime</div>
             </div>
 
             <button className="allow-location-btn" onClick={allowLocation} disabled={isDetectingLocation}>
-              Allow location
+              Enable precise location
             </button>
 
             <button className="deny-location-btn" onClick={denyLocation}>
               Not now
             </button>
 
-            <small className="location-permission-note">You can change your location anytime.</small>
+            <small className="location-permission-note">You can change your location anytime from the location button.</small>
+          </div>
+        </div>
+      )}
+
+      {/* EXACT LOCATION GATE — shown before checkout can open */}
+      {showCheckoutLocationPrompt && (
+        <div className="checkout-location-gate-overlay">
+          <div className="checkout-location-gate" role="dialog" aria-modal="true" aria-labelledby="checkout-location-title">
+            <button
+              className="checkout-location-gate__close"
+              type="button"
+              aria-label="Back to cart"
+              onClick={() => {
+                setShowCheckoutLocationPrompt(false)
+                setIsCartOpen(true)
+              }}
+            >
+              ✕
+            </button>
+
+            <div className="checkout-location-gate__icon" aria-hidden="true">
+              📍
+            </div>
+
+            <span className="checkout-location-gate__eyebrow">BEFORE YOU CHECK OUT</span>
+            <h2 id="checkout-location-title">Confirm your exact delivery location</h2>
+            <p>
+              We need your current GPS location to make sure NexSecond can deliver to your exact spot.
+            </p>
+
+            <div className="checkout-location-gate__steps">
+              <div><span>1</span><strong>Tap “Use my current location”</strong></div>
+              <div><span>2</span><strong>Tap “Allow” in your browser prompt</strong></div>
+              <div><span>3</span><strong>Wait until NexSecond says the location is verified</strong></div>
+            </div>
+
+            <div className={`checkout-location-gate__status${deliveryServiceability?.is_serviceable ? ' is-ready' : ''}`}>
+              <div className="checkout-location-gate__status-main">
+                <span className="checkout-location-gate__status-dot" aria-hidden="true"></span>
+                <div>
+                  <strong>
+                    {isDetectingLocation || deliveryServiceabilityLoading
+                      ? 'Checking your current location…'
+                      : deliveryServiceability?.is_serviceable && locationAccuracy != null
+                      ? 'Delivery available at your exact location'
+                      : userLatitude != null && userLongitude != null
+                      ? 'Location found — accuracy needs another check'
+                      : 'Current location not verified yet'}
+                  </strong>
+                  <span>
+                    {locationAccuracy != null
+                      ? `GPS accuracy: ±${Math.round(locationAccuracy)} m`
+                      : 'For best results, keep precise location enabled.'}
+                  </span>
+                </div>
+              </div>
+
+              {deliveryServiceability?.is_serviceable && locationAccuracy != null && locationAccuracy <= 100 && (
+                <span className="checkout-location-gate__verified">✓ Verified</span>
+              )}
+            </div>
+
+            <button
+              className="checkout-location-gate__primary"
+              type="button"
+              disabled={isDetectingLocation || deliveryServiceabilityLoading}
+              onClick={async () => {
+                if (isDetectingLocation || deliveryServiceabilityLoading) return
+
+                setIsDetectingLocation(true)
+                const liveLocation = await refreshLiveLocationAndCheck(true)
+                setIsDetectingLocation(false)
+
+                if (
+                  liveLocation?.serviceability?.is_serviceable &&
+                  Number(liveLocation.accuracy) <= 100
+                ) {
+                  setShowCheckoutLocationPrompt(false)
+                  setIsCheckoutOpen(true)
+                  showNotification(`Exact delivery location verified (±${Math.round(liveLocation.accuracy)} m) ✓`)
+                  return
+                }
+
+                if (liveLocation?.serviceability?.is_serviceable) {
+                  showNotification(
+                    `Location is serviceable, but GPS accuracy is ±${Math.round(liveLocation.accuracy)} m. Tap again for a stronger fix.`
+                  )
+                } else if (liveLocation) {
+                  showNotification('NexSecond is outside the delivery boundary at this exact location.')
+                }
+              }}
+            >
+              {isDetectingLocation || deliveryServiceabilityLoading
+                ? '📍 Detecting precise location…'
+                : '📍 Use my current location'}
+            </button>
+
+            <p className="checkout-location-gate__note">
+              We re-check your live location again when you place the order.
+            </p>
           </div>
         </div>
       )}
@@ -1549,21 +2029,45 @@ if (stock <= 0) {
 
             <div className="location-options">
 
-              <button onClick={getCurrentLocation}>
+              <button onClick={getCurrentLocation} disabled={isDetectingLocation}>
                 {isDetectingLocation ? '📍 Detecting precise location…' : '📍 Use my current location'}
               </button>
 
+              <div
+                style={{
+                  marginTop: '12px',
+                  padding: '12px 14px',
+                  borderRadius: '12px',
+                  background: deliveryServiceability?.is_serviceable ? '#f0fdf4' : '#f8fafc',
+                  border: '1px solid #e5e7eb',
+                  fontSize: '13px',
+                  lineHeight: 1.45,
+                }}
+              >
+                <strong>Delivery boundary</strong>
+                <div style={{ marginTop: '5px' }}>
+                  {deliveryServiceabilityLoading
+                    ? 'Checking your exact location…'
+                    : deliveryServiceability?.is_serviceable
+                    ? `✓ Delivery available in ${deliveryServiceability?.area_name || 'your location'}`
+                    : userLatitude != null && userLongitude != null
+                    ? '✕ This exact location is outside the NexSecond delivery boundary.'
+                    : 'Live GPS verification is required. Area names alone cannot verify the delivery boundary.'}
+                </div>
+              </div>
+
               <p className="location-label">
-                AVAILABLE AREAS
+                AREA LABELS
               </p>
 
               <button
                 onClick={() => {
+                  clearExactLocation()
                   setLocation('Harohalli')
                   localStorage.setItem('nexsecond_location', 'Harohalli')
                   localStorage.setItem('nexsecond_location_prompt_asked', 'true')
                   setIsLocationOpen(false)
-                  showNotification('Delivering to Harohalli 📍')
+                  showNotification('Harohalli selected. Use exact location to verify delivery 📍')
                 }}
               >
                 Harohalli
@@ -1571,11 +2075,12 @@ if (stock <= 0) {
 
               <button
                 onClick={() => {
+                  clearExactLocation()
                   setLocation('Kanakapura Road')
                   localStorage.setItem('nexsecond_location', 'Kanakapura Road')
                   localStorage.setItem('nexsecond_location_prompt_asked', 'true')
                   setIsLocationOpen(false)
-                  showNotification('Delivering to Kanakapura Road 📍')
+                  showNotification('Kanakapura Road selected. Use exact location to verify delivery 📍')
                 }}
               >
                 Kanakapura Road
@@ -1583,11 +2088,12 @@ if (stock <= 0) {
 
               <button
                 onClick={() => {
+                  clearExactLocation()
                   setLocation('Bangalore')
                   localStorage.setItem('nexsecond_location', 'Bangalore')
                   localStorage.setItem('nexsecond_location_prompt_asked', 'true')
                   setIsLocationOpen(false)
-                  showNotification('Delivering to Bangalore 📍')
+                  showNotification('Bangalore selected. Use exact location to verify delivery 📍')
                 }}
               >
                 Bangalore
@@ -1657,6 +2163,22 @@ if (stock <= 0) {
                     Location accuracy: ±{Math.round(locationAccuracy)} m
                   </small>
                 )}
+                <small
+                  style={{
+                    display: 'block',
+                    marginTop: '7px',
+                    fontWeight: 700,
+                    color: deliveryServiceability?.is_serviceable ? '#0c831f' : '#9a3412',
+                  }}
+                >
+                  {deliveryServiceabilityLoading
+                    ? 'Checking delivery boundary…'
+                    : deliveryServiceability?.is_serviceable
+                    ? '✓ Delivery available at this exact location'
+                    : userLatitude == null || userLongitude == null
+                    ? 'Exact location verification required before placing the order.'
+                    : '✕ This exact location is outside the NexSecond delivery boundary.'}
+                </small>
               </div>
 
               <div
@@ -1704,7 +2226,41 @@ if (stock <= 0) {
 
               <div className="checkout-summary">
 
-                {(discountAmount > 0 || quotedDeliveryFee === 0) && (<div key={`offer-${discountAmount}-${quotedDeliveryFee}-${checkoutQuote?.promotion || ""}`} className="checkout-benefit-reveal"><div className="checkout-benefit-reveal__icon">{discountAmount > 0 ? "🎉" : "🚚"}</div><div className="checkout-benefit-reveal__content"><strong>{discountAmount > 0 ? (checkoutQuote?.promotion || "Offer applied") : "FREE DELIVERY unlocked"}</strong><span>{discountAmount > 0 ? `You save ₹${discountAmount.toFixed(2)}` : "Your order qualifies for free delivery"}</span></div></div>)}
+                {hasCheckoutBenefit && (
+                  <div
+                    key={`benefit-${discountAmount}-${deliveryDiscountAmount}-${quotedSubtotal >= FREE_DELIVERY_THRESHOLD}`}
+                    className={`checkout-benefit-reveal${totalSavings > 0 ? ' checkout-benefit-reveal--saved' : ''}`}
+                  >
+                    <div className="checkout-benefit-reveal__icon">
+                      {discountAmount > 0 && deliveryDiscountAmount > 0 ? (
+                        <span className="checkout-benefit-reveal__icon-stack" aria-hidden="true">
+                          <span className="checkout-benefit-reveal__mini-icon">🎉</span>
+                          <span className="checkout-benefit-reveal__mini-icon">🚚</span>
+                        </span>
+                      ) : (
+                        <span className="checkout-benefit-reveal__single-icon" aria-hidden="true">
+                          {discountAmount > 0 ? '🎉' : '🚚'}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="checkout-benefit-reveal__content">
+                      <strong>{checkoutBenefitTitle}</strong>
+                      <span>{checkoutBenefitText}</span>
+                    </div>
+
+                    {totalSavings > 0 && (
+                      <div className="checkout-benefit-reveal__celebration" aria-hidden="true">
+                        <span className="checkout-benefit-reveal__spark checkout-benefit-reveal__spark--1">✦</span>
+                        <span className="checkout-benefit-reveal__spark checkout-benefit-reveal__spark--2">✦</span>
+                        <span className="checkout-benefit-reveal__spark checkout-benefit-reveal__spark--3">·</span>
+                        <span className="checkout-benefit-reveal__saved-chip">
+                          ₹{totalSavings.toFixed(2)} saved
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div>
                   <span>Items ({cartCount})</span>
@@ -1732,15 +2288,27 @@ if (stock <= 0) {
                   </strong>
                 </div>
 
+                {deliveryDiscountAmount > 0 && (
+                  <div className="delivery-discount-row">
+                    <span>Delivery discount</span>
+                    <strong>−₹{deliveryDiscountAmount.toFixed(2)}</strong>
+                  </div>
+                )}
+
                 {quotedSubtotal < FREE_DELIVERY_THRESHOLD && cartCount > 0 && (
                   <div className="free-delivery-hint">
                     ₹{(FREE_DELIVERY_THRESHOLD - quotedSubtotal).toFixed(2)} more for FREE delivery
                   </div>
                 )}
 
-                {discountAmount > 0 && (
+                {totalSavings > 0 && (
                   <div className="discount-hint">
-                    🎉 Discount applied — you save ₹{discountAmount.toFixed(2)}
+                    🎉 You save ₹{totalSavings.toFixed(2)} in total
+                    {deliveryDiscountAmount > 0 && (
+                      <span className="discount-hint__delivery">
+                        Delivery waived: ₹{deliveryDiscountAmount.toFixed(2)}
+                      </span>
+                    )}
                   </div>
                 )}
 
@@ -1796,6 +2364,32 @@ if (stock <= 0) {
                     return
                   }
 
+                  // Re-check the LIVE GPS position immediately before the order is
+                  // created. This prevents an order using stale coordinates from an
+                  // earlier in-boundary location.
+                  const liveLocation = await refreshLiveLocationAndCheck(false)
+
+                  if (!liveLocation?.serviceability?.is_serviceable) {
+                    setCheckoutError(
+                      'NexSecond is not delivering to your current exact location.'
+                    )
+                    setIsLocationOpen(true)
+                    return
+                  }
+
+                  if (Number(liveLocation.accuracy) > 100) {
+                    setCheckoutError(
+                      `Your GPS accuracy is ±${Math.round(liveLocation.accuracy)} m. Please use your current location again for a more precise fix before placing the order.`
+                    )
+                    setIsPlacingOrder(false)
+                    setIsCheckoutOpen(false)
+                    setShowCheckoutLocationPrompt(true)
+                    return
+                  }
+
+                  const orderLatitude = liveLocation.latitude
+                  const orderLongitude = liveLocation.longitude
+
                   setCheckoutError("")
                   setIsPlacingOrder(true)
 
@@ -1814,8 +2408,8 @@ if (stock <= 0) {
                         p_items: items,
                         p_payment_method:
                           'cash_on_delivery',
-                        p_latitude: userLatitude,
-                        p_longitude: userLongitude
+                        p_latitude: orderLatitude,
+                        p_longitude: orderLongitude
                       }
                     )
 
