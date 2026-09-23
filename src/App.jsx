@@ -51,6 +51,7 @@ function App() {
   )
   const [isCartOpen, setIsCartOpen] = useState(false)
   const [isLocationOpen, setIsLocationOpen] = useState(false)
+  const [selectedCategory, setSelectedCategory] = useState('All')
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false)
   const [isOrderConfirmed, setIsOrderConfirmed] = useState(false)
   const [lastOrderTotal, setLastOrderTotal] = useState(0)
@@ -62,9 +63,6 @@ function App() {
   const [checkoutError, setCheckoutError] = useState('')
   const [notification, setNotification] = useState('')
   const notificationTimerRef = useRef(null)
-  // Lock order submission immediately so rapid/repeated taps cannot start
-  // multiple async order requests before React updates isPlacingOrder.
-  const orderSubmissionLockRef = useRef(false)
   const [showLocationPermissionPrompt, setShowLocationPermissionPrompt] = useState(false)
   const [showCheckoutLocationPrompt, setShowCheckoutLocationPrompt] = useState(false)
   const [locationAccuracy, setLocationAccuracy] = useState(
@@ -529,6 +527,16 @@ function App() {
     setOrderHistoryLoading(false)
   }
 
+  const categories = [
+    { name: 'All', emoji: '✨' },
+    { name: 'Vegetables', emoji: '🥬' },
+    { name: 'Fruits', emoji: '🍎' },
+    { name: 'Dairy', emoji: '🥛' },
+    { name: 'Snacks', emoji: '🍪' },
+    { name: 'Drinks', emoji: '🥤' },
+    { name: 'Groceries', emoji: '🍚' },
+  ]
+
   useEffect(() => {
     async function fetchProducts() {
       const { data, error } = await supabase
@@ -835,7 +843,11 @@ function App() {
 
     const matchesSearch = !searchText || searchableText.includes(searchText)
 
-    return matchesSearch
+    const matchesCategory =
+      selectedCategory === 'All' ||
+      product.category === selectedCategory
+
+    return matchesSearch && matchesCategory
   })
 
   const addToCart = (product) => {
@@ -1039,6 +1051,7 @@ if (stock <= 0) {
     const revealSelector = [
       '.launch-panel',
       '.section-heading',
+      '.categories .category',
       '.products .product-card',
       '.benefits > div',
       '.site-footer-main > .footer-column',
@@ -1275,6 +1288,25 @@ if (stock <= 0) {
         </button>
 
         <button
+          className="mobile-action"
+          onClick={() => {
+            document.querySelector('.categories-section, .categories')?.scrollIntoView({
+              behavior: 'smooth',
+              block: 'start',
+            })
+          }}
+          aria-label="Browse categories"
+        >
+          <svg className="mobile-nav-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="4" y="4" width="6" height="6" rx="1.3" stroke="currentColor" strokeWidth="2" />
+            <rect x="14" y="4" width="6" height="6" rx="1.3" stroke="currentColor" strokeWidth="2" />
+            <rect x="4" y="14" width="6" height="6" rx="1.3" stroke="currentColor" strokeWidth="2" />
+            <rect x="14" y="14" width="6" height="6" rx="1.3" stroke="currentColor" strokeWidth="2" />
+          </svg>
+          <small>Categories</small>
+        </button>
+
+        <button
           className="mobile-action mobile-cart-action"
           onClick={() => setIsCartOpen(true)}
           aria-label={`Open cart with ${cartCount} item${cartCount === 1 ? '' : 's'}`}
@@ -1421,52 +1453,66 @@ if (stock <= 0) {
             </button>
           </div>
 
-          {launchNextMilestone && launchPromotion?.next_milestone && (
-            <div className="launch-milestone">
-              <div className="launch-milestone-top">
-                <div>
-                  <span className="launch-milestone-label">NEXT COMMUNITY MILESTONE</span>
-                  <strong>#{launchPromotion.next_milestone}</strong>
-                </div>
-
-                <div className="launch-milestone-reward">
-                  <strong>{launchNextMilestonePercent}% off</strong>
-                  <span>up to ₹{launchNextMilestoneCap.toFixed(0)}</span>
-                </div>
-              </div>
-
-              <div
-                className="launch-progress-track"
-                role="progressbar"
-                aria-label={`Progress toward milestone #${launchPromotion.next_milestone}`}
-                aria-valuemin="0"
-                aria-valuemax="100"
-                aria-valuenow={launchProgress}
-              >
-                <span style={{ width: `${launchProgress}%` }} />
-              </div>
-
-              <div className="launch-milestone-bottom">
-                <span>
-                  {launchCurrentOrders} {launchCurrentOrders === 1 ? 'order' : 'orders'} reached
-                </span>
-                <strong>
-                  {launchOrdersToNext > 0
-                    ? `${launchOrdersToNext} to go`
-                    : 'Milestone reached'}
-                </strong>
-              </div>
-            </div>
-          )}
         </section>
       )}
+
+      {/* CATEGORIES */}
+      <section className="section">
+        <div className="section-heading">
+          <div>
+            <h2>Shop by category</h2>
+            <p>Everything you need in one place</p>
+          </div>
+
+          <button
+            className="view-all"
+            onClick={() => setSelectedCategory('All')}
+          >
+            View all →
+          </button>
+        </div>
+
+        <div className="categories">
+          {categories.map((category) => (
+            <button
+              key={category.name}
+              className={`category ${
+                selectedCategory === category.name
+                  ? 'active-category'
+                  : ''
+              }`}
+              onClick={() => {
+                setSelectedCategory(category.name)
+
+                document.querySelector('.products-section')
+                  ?.scrollIntoView({ behavior: 'smooth' })
+              }}
+            >
+              <span className="category-emoji">
+                {category.emoji}
+              </span>
+
+              <span>{category.name}</span>
+            </button>
+          ))}
+        </div>
+      </section>
 
       {/* PRODUCTS */}
       <section className="section products-section">
         <div className="section-heading">
           <div>
-            <h2>Popular near you</h2>
-            <p>Customer favourites</p>
+            <h2>
+              {selectedCategory === 'All'
+                ? 'Popular near you'
+                : selectedCategory}
+            </h2>
+
+            <p>
+              {selectedCategory === 'All'
+                ? 'Customer favourites'
+                : `Best ${selectedCategory.toLowerCase()} for you`}
+            </p>
           </div>
         </div>
 
@@ -2249,14 +2295,9 @@ if (stock <= 0) {
               <button
                 className="place-order-btn"
                 disabled={isPlacingOrder}
-                aria-busy={isPlacingOrder}
                 onClick={async () => {
 
-                  // Lock synchronously before the first await. The previous flow
-                  // could accept another tap while GPS verification was still running.
-                  if (orderSubmissionLockRef.current || isPlacingOrder) return
-                  orderSubmissionLockRef.current = true
-                  setIsPlacingOrder(true)
+                  if (isPlacingOrder) return
 
                   // A customer must be logged in before an order can be placed.
                   // Keep checkout open so their entered delivery details are not lost.
@@ -2265,8 +2306,6 @@ if (stock <= 0) {
                       'Please login to your NexSecond account before placing an order.'
                     )
                     setIsLoginOpen(true)
-                    setIsPlacingOrder(false)
-                    orderSubmissionLockRef.current = false
                     return
                   }
 
@@ -2278,8 +2317,6 @@ if (stock <= 0) {
                     setCheckoutError(
                       "Please fill in all delivery details."
                     )
-                    setIsPlacingOrder(false)
-                    orderSubmissionLockRef.current = false
                     return
                   }
 
@@ -2287,8 +2324,6 @@ if (stock <= 0) {
                     setCheckoutError(
                       "Your cart is empty."
                     )
-                    setIsPlacingOrder(false)
-                    orderSubmissionLockRef.current = false
                     return
                   }
 
@@ -2302,8 +2337,6 @@ if (stock <= 0) {
                       'NexSecond is not delivering to your current exact location.'
                     )
                     setIsLocationOpen(true)
-                    setIsPlacingOrder(false)
-                    orderSubmissionLockRef.current = false
                     return
                   }
 
@@ -2314,7 +2347,6 @@ if (stock <= 0) {
                     setIsPlacingOrder(false)
                     setIsCheckoutOpen(false)
                     setShowCheckoutLocationPrompt(true)
-                    orderSubmissionLockRef.current = false
                     return
                   }
 
@@ -2322,6 +2354,7 @@ if (stock <= 0) {
                   const orderLongitude = liveLocation.longitude
 
                   setCheckoutError("")
+                  setIsPlacingOrder(true)
 
                   const items = cart.map((item) => ({
                     product_id: item.id,
@@ -2375,7 +2408,6 @@ if (stock <= 0) {
                     )
 
                     setIsPlacingOrder(false)
-                    orderSubmissionLockRef.current = false
                     return
                   }
 
@@ -2408,7 +2440,6 @@ if (stock <= 0) {
                   setIsCartOpen(false)
                   setCart([])
                   setIsOrderConfirmed(true)
-                  orderSubmissionLockRef.current = false
                 }}
               >
                 {isPlacingOrder
@@ -2617,16 +2648,17 @@ if (stock <= 0) {
 
             <button
               type="button"
-              onClick={() =>
+              onClick={() => {
+                setSelectedCategory('All')
                 document
                   .querySelector('.products-section')
                   ?.scrollIntoView({
                     behavior: 'smooth',
                     block: 'start',
                   })
-              }
+              }}
             >
-              Shop Products
+              Categories
             </button>
 
             <button
@@ -2663,6 +2695,36 @@ if (stock <= 0) {
             >
               Cart
             </button>
+          </div>
+
+          <div className="footer-column">
+            <h3>Categories</h3>
+
+            {[
+              'Vegetables',
+              'Fruits',
+              'Dairy',
+              'Snacks',
+              'Drinks',
+              'Groceries',
+            ].map((category) => (
+              <button
+                type="button"
+                key={category}
+                onClick={() => {
+                  setSelectedCategory(category)
+
+                  document
+                    .querySelector('.products-section')
+                    ?.scrollIntoView({
+                      behavior: 'smooth',
+                      block: 'start',
+                    })
+                }}
+              >
+                {category}
+              </button>
+            ))}
           </div>
 
           <div className="footer-column footer-service">
