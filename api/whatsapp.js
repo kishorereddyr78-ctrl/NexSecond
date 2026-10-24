@@ -110,11 +110,6 @@ async function askGemini(question) {
 }
 
 async function handleIncoming(message) {
-  if (
-    process.env.AI_MODE !== 'test' ||
-    !process.env.AI_TEST_PHONE_NUMBER ||
-    message?.from !== process.env.AI_TEST_PHONE_NUMBER
-  ) return;
   if (!message?.from || !message?.id) return;
   if (message.type !== 'text') {
     await sendWhatsApp(message.from, 'Hi! 💚 Please type your question as text, or reply 3 to talk to our team.');
