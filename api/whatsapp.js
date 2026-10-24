@@ -55,7 +55,7 @@ async function sendSupportEmail({ fromNumber, customerText, messageId }) {
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${required('RESEND_API_KEY')}`,
+      Authorization: `Bearer ${required('WHATSAPP_RESEND_API_KEY')}`,
       'Content-Type': 'application/json',
       'Idempotency-Key': `nexsecond-support/${messageId}`,
     },
